@@ -9,6 +9,7 @@
     "check:pg": "node scripts/check.mjs --pg"
   },
   "dependencies": {
+    "@netlify/blobs": "^11.1.9",
     "@netlify/database": "^2.0.3"
   },
   "devDependencies": {

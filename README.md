@@ -32,7 +32,9 @@ Testler: `npm run build && npm run check` (SQLite) ve `npm run check:pg` (yerel 
 - assets/: kahve fotoğrafları
 - drizzle/: yerel deneme (SQLite) şeması
 - netlify/database/migrations/: canlı (Postgres) şema migration'ları. Uygulanmış migration düzenlenmez; yalnızca yeni numaralı ekleme yapan dosyalar eklenir
-- netlify/functions/app.mjs: Netlify fonksiyon girişi
+- netlify/functions/app.mjs: Netlify fonksiyon girişi (yazma işlemlerinden sonra en fazla saatte bir `hourly/latest.json` yedeği alır)
+- netlify/functions/daily-backup.mjs: her gece (UTC 00:00 = TR 03:00) tam yedek alan zamanlanmış fonksiyon
+- server/backups.mjs: otomatik yedek yardımcıları (Netlify Blobs / bellek içi sahte store)
 - server/pg-d1.mjs: D1 benzeri arayüzü Postgres üzerinde sağlayan adaptör
 - scripts/build.mjs: Worker paketini üretir
 - scripts/dev.mjs: Windows/Linux üzerinde yerel deneme sunucusu
@@ -47,3 +49,9 @@ Canlı kayıtlar Netlify Database'de saklanır. Bu ZIP kaynak kod ve görselleri
 - Şema değişiklikleri (hem netlify/database/migrations/ hem de yerel test için drizzle/ altına, aynı içerikle) yalnızca yeni numaralı, ekleme yapan (additive) migration olmalıdır (örn. netlify/database/migrations/<rakamlar>_ad.sql: CREATE TABLE IF NOT EXISTS, ALTER TABLE ... ADD COLUMN). Mevcut migration dosyalarını değiştirmeyin; DROP, DELETE, TRUNCATE veya tabloyu yeniden oluşturma kullanmayın. scripts/check.mjs bunları otomatik reddeder.
 - Müşteri borcu siparişlerin (ürün adı ve fiyat anlık kopya olarak saklanır) ve tahsilatların toplamından hesaplanır; /api/admin/data yanıtındaki `balances` aynı hesabı sunucuda yapar. Menüden ürün silmek veya fiyat değiştirmek eski borçları etkilemez.
 - Bir kişiyi yeniden adlandırırsanız sipariş ve tahsilat kayıtları da yeni isme taşınır (tek işlemde); borç aynı kalır.
+
+## Otomatik yedek ve kahve kartları
+
+- Her gece UTC 00:00'da (Türkiye saatiyle 03:00) `netlify/functions/daily-backup.mjs` tam bir JSON dökümü alır ve Netlify Blobs'taki `backups` deposuna `daily/YYYY-MM-DD.json` (ve `latest.json`) olarak yazar; 30 günden eski günlük yedekler silinir. Ayrıca sipariş, ödeme, ayar, personel ve kahve kartı gibi yazma işlemlerinden sonra en fazla saatte bir `hourly/latest.json` yedeği arka planda alınır.
+- Yönetim paneli > Ayarlar > "Yedek ve veri güvenliği" altında "Otomatik yedekler" listelenir; "Geri yükle (eksikleri ekle)" yalnızca eksik kayıtları ekler, mevcut hiçbir kaydı silmez veya ezmez. Elle "Yedek indir / yükle" de durur. Yerelde (`npm run dev`) yedekler bellek içindedir.
+- Yönetim paneli > "Kahve kartları": kişinin kahvesi, şeker ve laktozsuz tercihi ile notu. Elle girilen bilgi, sipariş geçmişinden hesaplanan bilgiden önceliklidir; müşteri ekranındaki "Her zamanki" ve sipariş ön doldurma da bunu kullanır. Veriler `person_prefs` tablosunda durur ve yedeğe dahildir.
