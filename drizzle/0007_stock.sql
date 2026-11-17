@@ -1,0 +1,4 @@
+CREATE TABLE IF NOT EXISTS stock_items (id TEXT PRIMARY KEY, name TEXT NOT NULL, unit TEXT NOT NULL, qty REAL NOT NULL, min_qty REAL NOT NULL, updated TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS stock_moves (id TEXT PRIMARY KEY, item_id TEXT NOT NULL, delta REAL NOT NULL, reason TEXT NOT NULL, ref TEXT, created TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS stock_moves_ref ON stock_moves (ref);
+CREATE INDEX IF NOT EXISTS stock_moves_item ON stock_moves (item_id);
