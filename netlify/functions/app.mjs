@@ -8,7 +8,6 @@ let DB,BACKUPS;
 export default async (req, context) => {
   DB ??= createPgD1(getDatabase().pool);
   BACKUPS ??= blobBackups(getStore('backups'));
-  // Yazma işlemlerinden sonra (en fazla saatte bir) arka planda yedek; yanıtı geciktirmez.
   // Yazma sonrası yedek: yanıt dönmeden önce beklenir (saatte en fazla bir kez çalışır, diğer isteklerde anında döner).
   let job;
   const BACKUP_HOOK = () => { job = hourlyBackup({db: DB, store: BACKUPS, buildBackup}); };
