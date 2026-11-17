@@ -4,6 +4,15 @@
   "type": "module",
   "scripts": {
     "build": "node scripts/build.mjs",
-    "dev": "node scripts/dev.mjs"
+    "dev": "node scripts/dev.mjs",
+    "check": "node scripts/check.mjs",
+    "check:pg": "node scripts/check.mjs --pg"
+  },
+  "dependencies": {
+    "@netlify/database": "^2.0.3"
+  },
+  "devDependencies": {
+    "@netlify/database-dev": "^1.0.2",
+    "pg": "^8.23.1"
   }
 }
