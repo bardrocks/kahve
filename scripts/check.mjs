@@ -80,4 +80,22 @@ m=(await call('menu')).data;assert.deepEqual(m.products.map(p=>p.milk),[true,fal
 r=await call('orders',{id:crypto.randomUUID(),buyer:'Eski Kayıt',contact:'05548955011',items:[{id:'mocha',recipient:'E',payer:'E',sugar:0,qty:1,milk:'lactose_free'}]});assert.equal(r.status,200);assert.equal((await call('admin/data',null,true)).data.orders[0].items[0].price,130);
 assert.equal((await call('orders',{id:crypto.randomUUID(),buyer:'Eski Kayıt',contact:'05548955011',items:[{id:'americano',recipient:'E',payer:'E',sugar:0,qty:1,milk:'lactose_free'}]})).status,400);
 assert.equal((await post(m.products.map(p=>({id:p.id,price:p.price+1})))).status,200);m=(await call('menu')).data;assert.equal(m.products[0].price,121);assert.equal(m.products[0].milk,true);assert.equal(m.products[1].milk,false);
+// --- memory (Her zamanki) ---
+{await DB.prepare('INSERT INTO settings(id,data) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data').bind(JSON.stringify({name:'Mola Kahve',phone:'905548955011',products:[{id:'latte',name:'Latte',price:120,category:'Sütlü kahveler',desc:'x',tone:'latte',milk:true},{id:'americano',name:'Americano',price:90,category:'Sade kahveler',desc:'y',tone:'americano',milk:false},{id:'mocha',name:'Mocha',price:130,category:'Sütlü kahveler',desc:'z',tone:'mocha',milk:true}]})).run();
+const mem=name=>call('memory',{name}),ord=(buyer,items)=>call('orders',{id:crypto.randomUUID(),buyer,contact:'05548955011',items});
+assert.deepEqual((await mem('Memo Yeni')).data,{favorites:[]});
+const rc=(id,recipient,extra)=>({id,recipient,payer:recipient,qty:1,sugar:0,...extra});
+assert.equal((await ord('Memo Kişi',[rc('americano','Memo Kişi',{sugar:0})])).status,200);
+assert.equal((await ord('Memo Kişi',[rc('latte','Memo Kişi',{qty:3,sugar:2,sugars:[2,1,2],milk:'lactose_free'})])).status,200);
+assert.equal((await ord('Başkası',[rc('latte','memo  kişi',{sugar:5})])).status,200);
+let fav=(await mem(' MEMO   kişi ')).data.favorites;assert.equal(fav[0].productId,'latte');assert.equal(fav[0].count,4);assert.equal(fav[0].sugar,2);assert.equal(fav[0].milk,'normal');assert.equal(fav[1].productId,'americano');assert.equal(fav[1].milk,'normal');assert.equal(fav.length,2);
+assert.equal((await ord('Memo Kişi',[rc('latte','Memo Kişi',{qty:2,sugar:1,sugars:[1,1],milk:'lactose_free'})])).status,200);
+fav=(await mem('Memo Kişi')).data.favorites;assert.equal(fav[0].count,6);assert.equal(fav[0].sugar,1);assert.equal(fav[0].milk,'lactose_free');
+const cx=await ord('Memo Kişi',[rc('mocha','Memo Kişi',{qty:20,sugar:9})]);assert.equal(cx.status,200);const cxId=(await call('admin/data',null,true)).data.orders.find(o=>o.items[0].id==='mocha').id;await call('admin/status',{id:cxId,status:'cancelled'},true);
+fav=(await mem('Memo Kişi')).data.favorites;assert.ok(!fav.some(f=>f.productId==='mocha'));assert.equal(fav[0].productId,'latte');
+const menuNow=(await call('menu')).data;assert.equal((await call('admin/settings',{name:'Mola Kahve',phone:'905548955011',products:menuNow.products.filter(p=>p.id!=='latte')},true)).status,200);
+fav=(await mem('Memo Kişi')).data.favorites;assert.ok(!fav.some(f=>f.productId==='latte'));assert.equal(fav[0].productId,'americano');
+const lk=await call('admin/personal-link',{name:'Memo Kişi'},true),devA='c'.repeat(64),devB='d'.repeat(64);assert.equal((await call('claim-link',{code:lk.data.code},false,devA)).data.name,'Memo Kişi');
+assert.equal((await call('memory',{name:'Memo Kişi'},false,devB)).status,409);assert.deepEqual((await call('memory',{name:'Memo Kişi'},false,devB)).data,{favorites:[]});assert.equal((await call('memory',{name:'Memo Kişi'},false,devA)).data.favorites[0].productId,'americano');
+assert.equal((await call('memory',{name:'  '})).status,400);}
 console.log('PASS: menu add/edit/delete, validation, lactose-free milk snapshot, legacy settings, device-bound links, simultaneous first claim, forwarded link anonymity, reserved names, protected orders, new guest identity, admin reset/revocation, contact updates, ordering and staff regression');
