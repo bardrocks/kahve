@@ -205,4 +205,36 @@ rr=await AR('admin/auto-restore',{key:'latest.json'});assert.equal(rr.data.resul
 // restore silmez/ezmez: DB'de olan kayıt korunur
 assert.equal((await AR('admin/prefs',{name:'kart memo',coffee:'Espresso'})).status,200);await AR('admin/auto-restore',{key:'latest.json'});assert.equal((await AR('admin/data')).data.prefs.find(x=>x.name_key==='kart memo').coffee,'Espresso');
 }
+// --- ödeme yöntemi / tarih / düzenleme / kısmi ve fazla ödeme ---
+{const mk=(d)=>async(path,body,auth=false)=>{const r=await worker.fetch(new Request('https://mola.test/api/'+path,{method:body?'POST':'GET',headers:{Origin:'https://mola.test','X-Mola-Device':'a'.repeat(64),...(auth?{Authorization:'Bearer test-key'}:{}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:typeof body==='string'?body:JSON.stringify(body)}:{})}),{DB:d,ADMIN_KEY:'test-key'});return {status:r.status,data:await r.json().catch(()=>null),res:r}};
+const bal=async(c,name)=>(await c('admin/data',null,true)).data.balances.find(b=>b.person===name.toLocaleLowerCase('tr-TR').replace(/\s+/g,' '));
+const c1=mk(DB);const A=(p,b)=>c1(p,b,true),rem=async n=>(await bal(c1,n)).remaining,nm='Kısmi Ödeyen';
+const cur=(await c1('menu')).data;assert.equal((await A('admin/settings',{name:cur.name,phone:cur.phone,products:[...cur.products,{name:'Rapor Testi',price:100,category:'Sütlü kahveler',tone:'latte',milk:false}]})).status,200);
+const rid=(await c1('menu')).data.products.find(p=>p.name==='Rapor Testi').id,item=q=>[{id:rid,recipient:nm,payer:nm,qty:q,sugar:0}];
+assert.equal((await A('admin/order',{buyer:nm,items:item(5)})).status,200);assert.equal(await rem(nm),500);
+assert.equal((await c1('admin/payment-update',{id:'x',amount:1},false)).status,401);
+const past3=new Date(Date.now()-3*864e5).toISOString();
+assert.equal((await A('admin/payment',{person:nm,amount:300,method:'IBAN',note:'kısmi'})).status,200);assert.equal(await rem(nm),200);
+let pays=(await A('admin/data')).data.payments.filter(p=>p.person==='kısmi ödeyen');assert.equal(pays.length,1);assert.equal(pays[0].method,'IBAN');assert.equal(pays[0].note,'kısmi');
+for(const bad of [{created:new Date(Date.now()+36e5).toISOString()},{created:new Date(Date.now()-400*864e5).toISOString()},{created:'not a date'},{created:12345},{method:'Çek'},{method:5},{amount:0},{amount:1.5},{amount:-3},{amount:'20'}])assert.equal((await A('admin/payment',{person:nm,amount:20,...bad})).status,400,JSON.stringify(bad));
+assert.equal((await A('admin/payment',{person:'',amount:20})).status,400);assert.equal(await rem(nm),200);
+assert.equal((await A('admin/payment',{person:nm,amount:20,created:past3,method:'Diğer'})).status,200);assert.equal(await rem(nm),180);
+pays=(await A('admin/data')).data.payments.filter(p=>p.person==='kısmi ödeyen');const old=pays.find(p=>p.amount===20),first=pays.find(p=>p.amount===300);assert.equal(old.created,past3);assert.equal(old.method,'Diğer');
+// payment-update: doğrulama + etki
+assert.equal((await A('admin/payment-update',{amount:10})).status,400);assert.equal((await A('admin/payment-update',{id:'yok-boyle-id',amount:10})).status,404);
+for(const bad of [{amount:0},{amount:1.5},{amount:'5'},{amount:10000001},{amount:10,method:'Çek'},{amount:10,created:new Date(Date.now()+36e5).toISOString()},{amount:10,created:new Date(Date.now()-400*864e5).toISOString()},{amount:10,created:'zzz'}])assert.equal((await A('admin/payment-update',{id:first.id,...bad})).status,400,JSON.stringify(bad));
+assert.equal((await A('admin/payment-update',{id:first.id,amount:250,note:'düzeltildi',method:'Nakit'})).status,200);assert.equal(await rem(nm),230);
+pays=(await A('admin/data')).data.payments;let u=pays.find(p=>p.id===first.id);assert.equal(u.amount,250);assert.equal(u.note,'düzeltildi');assert.equal(u.method,'Nakit');assert.equal(u.created,first.created);assert.equal(u.person,'kısmi ödeyen');
+assert.equal((await A('admin/payment-update',{id:first.id,amount:250,created:past3})).status,200);u=(await A('admin/data')).data.payments.find(p=>p.id===first.id);assert.equal(u.created,past3);assert.equal(u.method,'Nakit','method verilmezse korunur');assert.equal(u.note,'');
+assert.equal((await A('admin/payment-update',{id:first.id,amount:250,method:''})).status,200);assert.equal((await A('admin/data')).data.payments.find(p=>p.id===first.id).method,null);
+// fazla ödeme -> negatif kalan
+const ov='Fazla Ödeyen';assert.equal((await A('admin/order',{buyer:ov,items:[{id:rid,recipient:ov,payer:ov,qty:1,sugar:0}]})).status,200);assert.equal((await A('admin/payment',{person:ov,amount:160,method:'Nakit'})).status,200);assert.equal(await rem(ov),-60);
+// yedek method taşır; eski yedek (method yok) yüklenir
+const bkm=(await A('admin/backup')).data;assert.ok(bkm.payments.some(p=>p.method==='Diğer'));
+{const f=await freshDB(),Z=mk(f);const rr=await Z('admin/restore',bkm,true);assert.equal(rr.status,200);const pz=(await Z('admin/data',null,true)).data.payments;assert.equal(pz.find(p=>p.id===old.id).method,'Diğer');assert.equal(pz.find(p=>p.id===old.id).created,past3);assert.equal((await bal(Z,nm)).remaining,230);assert.equal((await bal(Z,ov)).remaining,-60)}
+{const o2=structuredClone(bkm);for(const p of o2.payments)delete p.method;const f=await freshDB(),Z=mk(f);const rr=await Z('admin/restore',o2,true);assert.equal(rr.status,200);assert.ok((await Z('admin/data',null,true)).data.payments.every(p=>p.method===null||p.method===undefined));assert.equal((await bal(Z,ov)).remaining,-60)}
+{const bad=structuredClone(bkm);bad.payments[0].method='x'.repeat(31);const f=await freshDB();assert.equal((await mk(f)('admin/restore',bad,true)).status,400)}
+// silme borca geri ekler
+assert.equal((await A('admin/payment-delete',{id:old.id})).status,200);assert.equal(await rem(nm),250);
+}
 await stopPg();console.log((PG?'[postgres] ':'[sqlite] ')+'PASS: balances survive product delete/price change/menu resave/rename, backup+restore idempotent, redeploy, migration safety;  menu add/edit/delete, validation, lactose-free milk snapshot, legacy settings, person prefs + auto backups, device-bound links, simultaneous first claim, forwarded link anonymity, reserved names, protected orders, new guest identity, admin reset/revocation, contact updates, ordering and staff regression');
