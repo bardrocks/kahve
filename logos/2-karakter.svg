@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 160" role="img" aria-label="Coffyman">
+  <rect width="520" height="160" rx="28" fill="#f4f0ea"/>
+  <g transform="translate(34 14)">
+    <!-- buhar = saç / şapka -->
+    <path d="M42 30 c-10 -10 10 -14 0 -26 M62 30 c-10 -10 10 -14 0 -26 M82 30 c-10 -10 10 -14 0 -26" fill="none" stroke="#6b4a2f" stroke-width="6" stroke-linecap="round"/>
+    <!-- fincan gövdesi -->
+    <path d="M18 42 h104 v52 a40 40 0 0 1 -40 40 h-24 a40 40 0 0 1 -40 -40 z" fill="#6b4a2f"/>
+    <!-- kulp -->
+    <path d="M122 58 h8 a17 17 0 0 1 0 34 h-10" fill="none" stroke="#6b4a2f" stroke-width="10" stroke-linecap="round"/>
+    <!-- köpük şeridi -->
+    <rect x="18" y="42" width="104" height="12" rx="6" fill="#d6ac69"/>
+    <!-- yüz -->
+    <circle cx="52" cy="80" r="6" fill="#f4f0ea"/>
+    <circle cx="88" cy="80" r="6" fill="#f4f0ea"/>
+    <path d="M54 100 q16 14 32 0" fill="none" stroke="#f4f0ea" stroke-width="6" stroke-linecap="round"/>
+    <!-- yanaklar -->
+    <circle cx="40" cy="96" r="5" fill="#d6ac69" opacity=".7"/>
+    <circle cx="100" cy="96" r="5" fill="#d6ac69" opacity=".7"/>
+  </g>
+  <text x="192" y="98" font-family="Manrope, 'DM Sans', Arial, sans-serif" font-weight="800" font-size="58" letter-spacing="-1.5" fill="#3a2a1d">coffyman</text>
+  <text x="195" y="126" font-family="'DM Sans', Arial, sans-serif" font-weight="600" font-size="14" letter-spacing="3" fill="#8a6a4c">GÜNÜN EN GÜZEL ARASI</text>
+</svg>

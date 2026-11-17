@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 320" role="img" aria-label="Coffyman">
+  <defs>
+    <path id="top" d="M60 160 A100 100 0 0 1 260 160"/>
+    <path id="bottom" d="M44 160 A116 116 0 0 0 276 160"/>
+  </defs>
+  <circle cx="160" cy="160" r="156" fill="#1f3a2d"/>
+  <circle cx="160" cy="160" r="142" fill="none" stroke="#d6ac69" stroke-width="3"/>
+  <circle cx="160" cy="160" r="84" fill="none" stroke="#d6ac69" stroke-width="2" opacity=".6"/>
+  <text font-family="Manrope, 'DM Sans', Arial, sans-serif" font-weight="800" font-size="34" letter-spacing="6" fill="#f4f0ea"><textPath href="#top" startOffset="50%" text-anchor="middle">COFFYMAN</textPath></text>
+  <text font-family="'DM Sans', Arial, sans-serif" font-weight="700" font-size="15" letter-spacing="5" fill="#d6ac69"><textPath href="#bottom" startOffset="50%" text-anchor="middle">★ OFİS KAHVESİ ★</textPath></text>
+  <!-- kahve çekirdeği; ortadaki çizgi bir C harfi -->
+  <g transform="translate(160 162) rotate(-28)">
+    <ellipse cx="0" cy="0" rx="40" ry="56" fill="#d6ac69"/>
+    <path d="M10 -44 C-22 -22 22 22 -10 44" fill="none" stroke="#1f3a2d" stroke-width="8" stroke-linecap="round"/>
+  </g>
+  <circle cx="74" cy="160" r="4" fill="#d6ac69"/>
+  <circle cx="246" cy="160" r="4" fill="#d6ac69"/>
+</svg>
