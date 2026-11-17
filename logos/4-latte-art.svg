@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 320" role="img" aria-label="Coffyman">
+  <defs>
+    <path id="t4" d="M52 160 A108 108 0 0 1 268 160"/>
+    <path id="b4" d="M40 160 A120 120 0 0 0 280 160"/>
+  </defs>
+  <circle cx="160" cy="160" r="156" fill="#16181b"/>
+  <circle cx="160" cy="160" r="144" fill="none" stroke="#d6ac69" stroke-width="2.5"/>
+  <text font-family="Manrope, 'DM Sans', Arial, sans-serif" font-weight="800" font-size="32" letter-spacing="7" fill="#f4f0ea"><textPath href="#t4" startOffset="50%" text-anchor="middle">COFFYMAN</textPath></text>
+  <text font-family="'DM Sans', Arial, sans-serif" font-weight="700" font-size="14" letter-spacing="5" fill="#d6ac69"><textPath href="#b4" startOffset="50%" text-anchor="middle">GÜNÜN EN GÜZEL ARASI</textPath></text>
+  <!-- üstten fincan: tabak, fincan, kahve, kalp latte art -->
+  <circle cx="160" cy="162" r="76" fill="#25282c" stroke="#d6ac69" stroke-width="2" opacity=".95"/>
+  <path d="M226 150 h14 a14 14 0 0 1 0 28 h-14" fill="none" stroke="#f4f0ea" stroke-width="9" stroke-linecap="round"/>
+  <circle cx="160" cy="162" r="56" fill="#f4f0ea"/>
+  <circle cx="160" cy="162" r="46" fill="#7a5233"/>
+  <path d="M160 194 C126 172 128 140 146 138 C154 137 159 143 160 149 C161 143 166 137 174 138 C192 140 194 172 160 194 Z" fill="#f4f0ea"/>
+  <path d="M160 194 L160 206" stroke="#f4f0ea" stroke-width="3" stroke-linecap="round"/>
+</svg>
