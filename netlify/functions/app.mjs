@@ -9,8 +9,12 @@ export default async (req, context) => {
   DB ??= createPgD1(getDatabase().pool);
   BACKUPS ??= blobBackups(getStore('backups'));
   // Yazma işlemlerinden sonra (en fazla saatte bir) arka planda yedek; yanıtı geciktirmez.
-  const BACKUP_HOOK = () => { const job = hourlyBackup({db: DB, store: BACKUPS, buildBackup}); try { context?.waitUntil?.(job); } catch {} };
+  // Yazma sonrası yedek: yanıt dönmeden önce beklenir (saatte en fazla bir kez çalışır, diğer isteklerde anında döner).
+  let job;
+  const BACKUP_HOOK = () => { job = hourlyBackup({db: DB, store: BACKUPS, buildBackup}); };
   const BACKUP_NOW = async () => { const b = await buildBackup(DB), at = new Date().toISOString(); await BACKUPS.set('hourly/latest.json', b, {at}); return {key: 'hourly/latest.json', orders: b.orders.length, at}; };
-  return worker.fetch(req, {DB, BACKUPS, BACKUP_HOOK, BACKUP_NOW, ADMIN_KEY: Netlify.env.get('ADMIN_KEY')});
+  const res = await worker.fetch(req, {DB, BACKUPS, BACKUP_HOOK, BACKUP_NOW, ADMIN_KEY: Netlify.env.get('ADMIN_KEY')});
+  if (job) await job;
+  return res;
 };
 export const config = {path: '/*'};
