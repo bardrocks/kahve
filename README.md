@@ -24,7 +24,15 @@ npm run dev
 
 Tarayıcıda http://localhost:4173 adresini açın. Harici npm bağımlılığı yoktur; npm install gerekmez.
 
-Yerel deneme yönetim şifresi: preview-only
+Yerel deneme yönetim şifresi varsayılan olarak: preview-only
+
+Değiştirmek için proje klasöründe `.env` adlı bir dosya oluşturup içine şunu yazın (bu dosya git'e gönderilmez):
+
+```
+ADMIN_KEY=yeni-sifreniz
+```
+
+Canlı sitenin yönetim şifresi kodda değildir; yayın ortamındaki `ADMIN_KEY` gizli değişkeninden okunur ve Sites/hosting ayarlarından değiştirilir.
 
 Yerel sunucu deneme amaçlıdır; veritabanı bellektedir ve sunucu kapanınca deneme kayıtları silinir. Canlı sitedeki sipariş, personel, telefon, borç ve ödeme kayıtlarına bağlanmaz. Canlı yönetim şifresi bu pakette bulunmaz.
 
