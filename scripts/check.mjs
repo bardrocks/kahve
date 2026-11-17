@@ -1,4 +1,5 @@
-import assert from 'node:assert/strict';import fs from 'node:fs';import vm from 'node:vm';import worker from '../dist/server/index.js';import {DB} from './dev.mjs';
+import assert from 'node:assert/strict';import fs from 'node:fs';import vm from 'node:vm';import worker from '../dist/server/index.js';import {DB,createDB} from './dev.mjs';
+for(const f of fs.readdirSync('drizzle').filter(f=>f.endsWith('.sql')))assert.ok(!/\bDROP\s+(TABLE|INDEX|VIEW|TRIGGER|COLUMN)\b|\bDELETE\s+FROM\b|\bTRUNCATE\b|\bALTER\s+TABLE\b[^;]*\bDROP\b|\bRENAME\s+(TO|COLUMN)\b/i.test(fs.readFileSync('drizzle/'+f,'utf8').replace(/--.*$/gm,'')),'Yıkıcı migration yasak: drizzle/'+f);
 const html=fs.readFileSync('index.html','utf8');new vm.Script(html.match(/<script>([\s\S]*?)<\/script>/)[1]);
 const call=async(path,body,auth=false,device='a'.repeat(64))=>{const r=await worker.fetch(new Request('https://mola.test/api/'+path,{method:body?'POST':'GET',headers:{Origin:'https://mola.test','X-Mola-Device':device,...(auth?{Authorization:'Bearer test-key'}:{}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})}),{DB,ADMIN_KEY:'test-key'});return {status:r.status,data:await r.json()}};
 assert.equal((await call('admin/data')).status,401);for(const sugar of [-1,1.5,100]){assert.equal((await call('orders',{id:crypto.randomUUID(),buyer:'Can',contact:'05548955011',items:[{id:'latte',recipient:'Can',payer:'Can',sugar,qty:1}]})).status,400)}const menu=await call('menu');assert.equal(menu.data.products[0].price,120);
@@ -98,4 +99,44 @@ fav=(await mem('Memo Kişi')).data.favorites;assert.ok(!fav.some(f=>f.productId=
 const lk=await call('admin/personal-link',{name:'Memo Kişi'},true),devA='c'.repeat(64),devB='d'.repeat(64);assert.equal((await call('claim-link',{code:lk.data.code},false,devA)).data.name,'Memo Kişi');
 assert.equal((await call('memory',{name:'Memo Kişi'},false,devB)).status,409);assert.deepEqual((await call('memory',{name:'Memo Kişi'},false,devB)).data,{favorites:[]});assert.equal((await call('memory',{name:'Memo Kişi'},false,devA)).data.favorites[0].productId,'americano');
 assert.equal((await call('memory',{name:'  '})).status,400);}
-console.log('PASS: menu add/edit/delete, validation, lactose-free milk snapshot, legacy settings, device-bound links, simultaneous first claim, forwarded link anonymity, reserved names, protected orders, new guest identity, admin reset/revocation, contact updates, ordering and staff regression');
+
+{
+const mk=(d)=>async(path,body,auth=false)=>{const r=await worker.fetch(new Request('https://mola.test/api/'+path,{method:body?'POST':'GET',headers:{Origin:'https://mola.test','X-Mola-Device':'a'.repeat(64),...(auth?{Authorization:'Bearer test-key'}:{}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:typeof body==='string'?body:JSON.stringify(body)}:{})}),{DB:d,ADMIN_KEY:'test-key'});return {status:r.status,data:await r.json().catch(()=>null),res:r}};
+const bal=async(c,name)=>(await c('admin/data',null,true)).data.balances.find(b=>b.person===name.toLocaleLowerCase('tr-TR').replace(/\s+/g,' '));
+const c1=mk(DB);
+const st=await c1('admin/staff',{name:'Borçlu Deneme',phone:'0554 777 66 55'},true);assert.equal(st.status,200);
+const ordD=await c1('orders',{id:crypto.randomUUID(),buyer:'Borçlu Deneme',contact:'05548955011',items:[{id:'americano',recipient:'Borçlu Deneme',payer:'Borçlu Deneme',sugar:1,qty:3},{id:'mocha',recipient:'Dost',payer:'Borçlu Deneme',sugar:0,qty:1}]});assert.equal(ordD.status,200);
+const dataD=(await c1('admin/data',null,true)).data;const oD=dataD.orders.find(o=>o.id===ordD.data.id);await c1('admin/status',{id:oD.id,status:'delivered'},true);
+const pendingId=crypto.randomUUID();assert.equal((await c1('orders',{id:pendingId,buyer:'Borçlu Deneme',contact:'05548955011',items:[{id:'americano',recipient:'x',payer:'Borçlu Deneme',sugar:0,qty:1}]})).status,200);
+assert.equal((await c1('admin/payment',{person:'Borçlu  Deneme',amount:100},true)).status,200);
+let b0=await bal(c1,'Borçlu Deneme');assert.ok(b0);assert.equal(b0.total,3*90+130);assert.equal(b0.paid,100);assert.equal(b0.remaining,300);assert.equal(b0.count,4);
+// client-visible consistency: server balances equal a recompute from orders/payments
+{const d=(await c1('admin/data',null,true)).data,m={};for(const o of d.orders){if(['pending','cancelled'].includes(o.status))continue;for(const i of o.items)m[i.payer]=(m[i.payer]||0)+i.qty*i.price}for(const p of d.payments)m[p.person]=(m[p.person]||0)-p.amount;for(const b of d.balances)assert.equal(b.remaining,m[b.person]||0)}
+// delete product, change price, re-save menu entirely
+let mn=(await c1('menu')).data;assert.equal((await c1('admin/settings',{name:mn.name,phone:mn.phone,products:mn.products.filter(p=>p.id!=='mocha')},true)).status,200);assert.equal((await bal(c1,'Borçlu Deneme')).remaining,300);
+mn=(await c1('menu')).data;mn.products.find(p=>p.id==='americano').price=999;assert.equal((await c1('admin/settings',{...mn},true)).status,200);assert.equal((await bal(c1,'Borçlu Deneme')).remaining,300);
+mn=(await c1('menu')).data;assert.equal((await c1('admin/settings',{name:mn.name,phone:mn.phone,lactoseFreeExtra:5,products:mn.products.map(p=>({...p,price:p.price+1}))},true)).status,200);assert.equal((await bal(c1,'Borçlu Deneme')).remaining,300);
+// rename
+assert.equal((await c1('admin/staff',{id:st.data.id,name:'Yeni   İsim Kişi',phone:'0554 777 66 55'},true)).status,200);
+assert.equal(await bal(c1,'Borçlu Deneme'),undefined);let b1=await bal(c1,'Yeni İsim Kişi');assert.equal(b1.remaining,300);assert.equal(b1.paid,100);
+{const d=(await c1('admin/data',null,true)).data;assert.ok(!d.payments.some(p=>p.person==='borçlu deneme'));assert.ok(d.orders.find(o=>o.id===ordD.data.id).items.filter(i=>i.recipient==='Yeni İsim Kişi').length>=1);assert.equal(d.orders.find(o=>o.id===ordD.data.id).items[0].price,90)}
+// rename onto an existing name is refused and changes nothing
+const other=await c1('admin/staff',{name:'Başka Kişi',phone:'0554 888 11 22'},true);assert.equal(other.status,200);assert.equal((await c1('admin/staff',{id:other.data.id,name:'yeni isim kişi',phone:'0554 888 11 22'},true)).status,409);assert.equal((await bal(c1,'Yeni İsim Kişi')).remaining,300);
+// backup
+const bk=await c1('admin/backup',null,true);assert.equal(bk.status,200);assert.match(bk.res.headers.get('content-disposition'),/mola-yedek-\d{4}-\d{2}-\d{2}\.json/);const bd=bk.data;assert.equal(bd.version,1);for(const t of ['settings','orders','payments','staff','customer_profiles','personal_links'])assert.ok(t in bd);assert.ok(bd.orders.length>5&&Array.isArray(bd.orders[0].items));assert.equal((await c1('admin/backup')).status,401);
+const before=(await c1('admin/data',null,true)).data.balances;
+// restore into a brand-new empty DB
+const db2=createDB(),c2=mk(db2);assert.equal((await c2('admin/restore',bd)).status,401);
+let rs=await c2('admin/restore',bd,true);assert.equal(rs.status,200);assert.equal(rs.data.result.orders.added,bd.orders.length);assert.equal(rs.data.result.orders.skipped,0);assert.equal(rs.data.result.settings.added,1);
+assert.deepEqual((await c2('admin/data',null,true)).data.balances,before);assert.equal((await c2('menu')).data.products.find(p=>p.id==='americano').price,(await c1('menu')).data.products.find(p=>p.id==='americano').price);
+rs=await c2('admin/restore',bd,true);assert.equal(rs.status,200);for(const t of ['orders','payments','staff','customer_profiles','personal_links'])assert.equal(rs.data.result[t].added,0);assert.equal(rs.data.result.settings.added,0);assert.equal((await c2('admin/data',null,true)).data.orders.length,bd.orders.length);assert.equal((await c2('admin/data',null,true)).data.payments.length,bd.payments.length);
+// restore never overwrites or removes existing records
+const tampered=structuredClone(bd);tampered.orders[0].total=1;tampered.payments[0]&&(tampered.payments[0].amount=1);tampered.settings.name='Başka';await c2('admin/restore',tampered,true);assert.deepEqual((await c2('admin/data',null,true)).data.balances,before);assert.notEqual((await c2('menu')).data.name,'Başka');
+const partial=await c2('admin/restore',{version:1,orders:[],payments:[]},true);assert.equal(partial.status,200);assert.deepEqual((await c2('admin/data',null,true)).data.balances,before);
+// invalid input -> 400
+for(const bad of ['not json','[]','{"version":2}',JSON.stringify({version:1,orders:'x'}),JSON.stringify({version:1,orders:[{id:'x'}]}),JSON.stringify({version:1,payments:[{id:'p',person:'a',amount:1.5,created:'',note:''}]}),JSON.stringify({version:1,settings:{}}),JSON.stringify({version:1,orders:[null]})])assert.equal((await c2('admin/restore',bad,true)).status,400);
+assert.equal((await c2('admin/restore','x'.repeat(20000001),true)).status,400);
+// simulated redeploy: re-import the worker module against the same DB
+const worker2=(await import('../dist/server/index.js?redeploy='+Date.now())).default;assert.notEqual(worker2,worker);const r2=await worker2.fetch(new Request('https://mola.test/api/admin/data',{headers:{Authorization:'Bearer test-key'}}),{DB,ADMIN_KEY:'test-key'});assert.deepEqual((await r2.json()).balances,before);
+}
+console.log('PASS: balances survive product delete/price change/menu resave/rename, backup+restore idempotent, redeploy, migration safety;  menu add/edit/delete, validation, lactose-free milk snapshot, legacy settings, device-bound links, simultaneous first claim, forwarded link anonymity, reserved names, protected orders, new guest identity, admin reset/revocation, contact updates, ordering and staff regression');

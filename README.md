@@ -40,3 +40,11 @@ Yerel sunucu deneme amaçlıdır; veritabanı bellektedir ve sunucu kapanınca d
 - .openai/hosting.json: mevcut Sites yayın kimliği ve veritabanı bağlaması
 
 Canlı kayıtlar Sites üzerinde ayrı bir veritabanında saklanır. Bu ZIP kaynak kod ve görsellerin kopyasıdır; canlı veri yedeği değildir. Kaynakları indirmek canlı yayını değiştirmez.
+
+## Güncelleme yaparken verileri koruma
+
+- Siparişler, borçlar, tahsilatlar, personel ve ayarlar kod paketinde değil, canlı veritabanında (D1) durur. Kodu yeniden yayınlamak bu verileri silmez veya sıfırlamaz.
+- Her yayından önce Yönetim paneli > Ayarlar > "Yedek indir" ile tam yedek alın (mola-yedek-YYYY-MM-DD.json). "Yedek yükle" yalnızca eksik kayıtları ekler; mevcut kayıtları silmez veya ezmez.
+- Şema değişiklikleri yalnızca yeni numaralı, ekleme yapan (additive) migration olmalıdır (örn. drizzle/0004_ad.sql: CREATE TABLE IF NOT EXISTS, ALTER TABLE ... ADD COLUMN). Mevcut drizzle dosyalarını değiştirmeyin; DROP, DELETE, TRUNCATE veya tabloyu yeniden oluşturma kullanmayın. scripts/check.mjs bunları otomatik reddeder.
+- Müşteri borcu siparişlerin (ürün adı ve fiyat anlık kopya olarak saklanır) ve tahsilatların toplamından hesaplanır; /api/admin/data yanıtındaki `balances` aynı hesabı sunucuda yapar. Menüden ürün silmek veya fiyat değiştirmek eski borçları etkilemez.
+- Bir kişiyi yeniden adlandırırsanız sipariş ve tahsilat kayıtları da yeni isme taşınır (tek işlemde); borç aynı kalır.
