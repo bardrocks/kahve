@@ -2,3 +2,4 @@ dist/
 outputs/
 node_modules/
 .env*
+.netlify

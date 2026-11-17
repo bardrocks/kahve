@@ -50,7 +50,7 @@ assert.equal((await call('claim-link',{code:reset.data.code},false,browserB)).da
 assert.equal((await call('admin/staff',{id:personalId,name:'İbrahim Kaya',phone:'05551119988'},true)).status,200);assert.equal((await call('identity',null,false,browserB)).data.name,'İbrahim Kaya');
 await call('admin/staff-delete',{id:personalId},true);assert.equal((await call('claim-link',{code:reset.data.code},false,browserB)).status,404);
 // --- menu management, lactose-free milk, legacy settings ---
-const base=()=>({name:'Mola Kahve',phone:'905548955011'});
+const base=()=>({name:'Coffyman',phone:'905548955011'});
 let m=(await call('menu')).data;assert.deepEqual(m.products.filter(p=>p.milk).map(p=>p.id).sort(),['cappuccino','latte','mocha']);assert.equal(m.lactoseFreeExtra,0);assert.ok(m.tones.includes('latte')&&!m.tones.includes('hero'));
 const post=(products,extra={})=>call('admin/settings',{...base(),products,...extra},true);
 assert.equal((await call('admin/settings',{...base(),products:m.products})).status,401);
@@ -78,13 +78,13 @@ assert.equal((await call('orders',{id:crypto.randomUUID(),buyer:'Deniz Aksoy',co
 assert.equal((await post(m.products.slice(0,1).map(p=>({...p,id:'zzz-unknown'})))).status,200);assert.equal((await call('menu')).data.products.length,1);assert.notEqual((await call('menu')).data.products[0].id,'zzz-unknown');
 assert.equal((await call('admin/data',null,true)).data.orders.length,snapshot.orders.length);
 // legacy settings row (no milk flags / extra / tone-less fields beyond id)
-await DB.prepare('INSERT INTO settings(id,data) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data').bind(JSON.stringify({name:'Mola Kahve',phone:'905548955011',products:[{id:'latte',name:'Latte',price:120,category:'Sütlü kahveler',desc:'x',tone:'latte'},{id:'americano',name:'Americano',price:90,category:'Sade kahveler',desc:'y',tone:'americano'},{id:'mocha',name:'Mocha',price:130,category:'Sütlü kahveler',desc:'z',tone:'mocha'}]})).run();
+await DB.prepare('INSERT INTO settings(id,data) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data').bind(JSON.stringify({name:'Coffyman',phone:'905548955011',products:[{id:'latte',name:'Latte',price:120,category:'Sütlü kahveler',desc:'x',tone:'latte'},{id:'americano',name:'Americano',price:90,category:'Sade kahveler',desc:'y',tone:'americano'},{id:'mocha',name:'Mocha',price:130,category:'Sütlü kahveler',desc:'z',tone:'mocha'}]})).run();
 m=(await call('menu')).data;assert.deepEqual(m.products.map(p=>p.milk),[true,false,true]);assert.equal(m.lactoseFreeExtra,0);
 r=await call('orders',{id:crypto.randomUUID(),buyer:'Eski Kayıt',contact:'05548955011',items:[{id:'mocha',recipient:'E',payer:'E',sugar:0,qty:1,milk:'lactose_free'}]});assert.equal(r.status,200);assert.equal((await call('admin/data',null,true)).data.orders[0].items[0].price,130);
 assert.equal((await call('orders',{id:crypto.randomUUID(),buyer:'Eski Kayıt',contact:'05548955011',items:[{id:'americano',recipient:'E',payer:'E',sugar:0,qty:1,milk:'lactose_free'}]})).status,400);
 assert.equal((await post(m.products.map(p=>({id:p.id,price:p.price+1})))).status,200);m=(await call('menu')).data;assert.equal(m.products[0].price,121);assert.equal(m.products[0].milk,true);assert.equal(m.products[1].milk,false);
 // --- memory (Her zamanki) ---
-{await DB.prepare('INSERT INTO settings(id,data) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data').bind(JSON.stringify({name:'Mola Kahve',phone:'905548955011',products:[{id:'latte',name:'Latte',price:120,category:'Sütlü kahveler',desc:'x',tone:'latte',milk:true},{id:'americano',name:'Americano',price:90,category:'Sade kahveler',desc:'y',tone:'americano',milk:false},{id:'mocha',name:'Mocha',price:130,category:'Sütlü kahveler',desc:'z',tone:'mocha',milk:true}]})).run();
+{await DB.prepare('INSERT INTO settings(id,data) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data').bind(JSON.stringify({name:'Coffyman',phone:'905548955011',products:[{id:'latte',name:'Latte',price:120,category:'Sütlü kahveler',desc:'x',tone:'latte',milk:true},{id:'americano',name:'Americano',price:90,category:'Sade kahveler',desc:'y',tone:'americano',milk:false},{id:'mocha',name:'Mocha',price:130,category:'Sütlü kahveler',desc:'z',tone:'mocha',milk:true}]})).run();
 const mem=name=>call('memory',{name}),ord=(buyer,items)=>call('orders',{id:crypto.randomUUID(),buyer,contact:'05548955011',items});
 assert.deepEqual((await mem('Memo Yeni')).data,{favorites:[]});
 const rc=(id,recipient,extra)=>({id,recipient,payer:recipient,qty:1,sugar:0,...extra});
@@ -96,7 +96,7 @@ assert.equal((await ord('Memo Kişi',[rc('latte','Memo Kişi',{qty:2,sugar:1,sug
 fav=(await mem('Memo Kişi')).data.favorites;assert.equal(fav[0].count,6);assert.equal(fav[0].sugar,1);assert.equal(fav[0].milk,'lactose_free');
 const cx=await ord('Memo Kişi',[rc('mocha','Memo Kişi',{qty:20,sugar:9})]);assert.equal(cx.status,200);const cxId=(await call('admin/data',null,true)).data.orders.find(o=>o.items[0].id==='mocha').id;await call('admin/status',{id:cxId,status:'cancelled'},true);
 fav=(await mem('Memo Kişi')).data.favorites;assert.ok(!fav.some(f=>f.productId==='mocha'));assert.equal(fav[0].productId,'latte');
-const menuNow=(await call('menu')).data;assert.equal((await call('admin/settings',{name:'Mola Kahve',phone:'905548955011',products:menuNow.products.filter(p=>p.id!=='latte')},true)).status,200);
+const menuNow=(await call('menu')).data;assert.equal((await call('admin/settings',{name:'Coffyman',phone:'905548955011',products:menuNow.products.filter(p=>p.id!=='latte')},true)).status,200);
 fav=(await mem('Memo Kişi')).data.favorites;assert.ok(!fav.some(f=>f.productId==='latte'));assert.equal(fav[0].productId,'americano');
 const lk=await call('admin/personal-link',{name:'Memo Kişi'},true),devA='c'.repeat(64),devB='d'.repeat(64);assert.equal((await call('claim-link',{code:lk.data.code},false,devA)).data.name,'Memo Kişi');
 assert.equal((await call('memory',{name:'Memo Kişi'},false,devB)).status,409);assert.deepEqual((await call('memory',{name:'Memo Kişi'},false,devB)).data,{favorites:[]});assert.equal((await call('memory',{name:'Memo Kişi'},false,devA)).data.favorites[0].productId,'americano');
@@ -125,7 +125,7 @@ assert.equal(await bal(c1,'Borçlu Deneme'),undefined);let b1=await bal(c1,'Yeni
 // rename onto an existing name is refused and changes nothing
 const other=await c1('admin/staff',{name:'Başka Kişi',phone:'0554 888 11 22'},true);assert.equal(other.status,200);assert.equal((await c1('admin/staff',{id:other.data.id,name:'yeni isim kişi',phone:'0554 888 11 22'},true)).status,409);assert.equal((await bal(c1,'Yeni İsim Kişi')).remaining,300);
 // backup
-const bk=await c1('admin/backup',null,true);assert.equal(bk.status,200);assert.match(bk.res.headers.get('content-disposition'),/mola-yedek-\d{4}-\d{2}-\d{2}\.json/);const bd=bk.data;assert.equal(bd.version,1);for(const t of ['settings','orders','payments','staff','customer_profiles','personal_links'])assert.ok(t in bd);assert.ok(bd.orders.length>5&&Array.isArray(bd.orders[0].items));assert.equal((await c1('admin/backup')).status,401);
+const bk=await c1('admin/backup',null,true);assert.equal(bk.status,200);assert.match(bk.res.headers.get('content-disposition'),/coffyman-yedek-\d{4}-\d{2}-\d{2}\.json/);const bd=bk.data;assert.equal(bd.version,1);for(const t of ['settings','orders','payments','staff','customer_profiles','personal_links'])assert.ok(t in bd);assert.ok(bd.orders.length>5&&Array.isArray(bd.orders[0].items));assert.equal((await c1('admin/backup')).status,401);
 const before=(await c1('admin/data',null,true)).data.balances;
 // restore into a brand-new empty DB
 const db2=createDB(),c2=mk(db2);assert.equal((await c2('admin/restore',bd)).status,401);

@@ -1,4 +1,4 @@
-# Mola Kahve
+# Coffyman
 
 Kahve siparişi, WhatsApp sipariş özeti, kişi hesapları, tahsilatlar, personel rehberi ve tarayıcıya bağlı kişisel bağlantılar.
 
@@ -43,7 +43,7 @@ Canlı kayıtlar Netlify Database'de saklanır. Bu ZIP kaynak kod ve görselleri
 ## Güncelleme yaparken verileri koruma
 
 - Siparişler, borçlar, tahsilatlar, personel ve ayarlar kod paketinde değil, canlı veritabanında (Netlify Database) durur. Kodu yeniden yayınlamak bu verileri silmez veya sıfırlamaz.
-- Her yayından önce Yönetim paneli > Ayarlar > "Yedek indir" ile tam yedek alın (mola-yedek-YYYY-MM-DD.json). "Yedek yükle" yalnızca eksik kayıtları ekler; mevcut kayıtları silmez veya ezmez.
+- Her yayından önce Yönetim paneli > Ayarlar > "Yedek indir" ile tam yedek alın (coffyman-yedek-YYYY-MM-DD.json). "Yedek yükle" yalnızca eksik kayıtları ekler; mevcut kayıtları silmez veya ezmez.
 - Şema değişiklikleri (hem netlify/database/migrations/ hem de yerel test için drizzle/ altına, aynı içerikle) yalnızca yeni numaralı, ekleme yapan (additive) migration olmalıdır (örn. netlify/database/migrations/<rakamlar>_ad.sql: CREATE TABLE IF NOT EXISTS, ALTER TABLE ... ADD COLUMN). Mevcut migration dosyalarını değiştirmeyin; DROP, DELETE, TRUNCATE veya tabloyu yeniden oluşturma kullanmayın. scripts/check.mjs bunları otomatik reddeder.
 - Müşteri borcu siparişlerin (ürün adı ve fiyat anlık kopya olarak saklanır) ve tahsilatların toplamından hesaplanır; /api/admin/data yanıtındaki `balances` aynı hesabı sunucuda yapar. Menüden ürün silmek veya fiyat değiştirmek eski borçları etkilemez.
 - Bir kişiyi yeniden adlandırırsanız sipariş ve tahsilat kayıtları da yeni isme taşınır (tek işlemde); borç aynı kalır.

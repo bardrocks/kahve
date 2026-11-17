@@ -1,4 +1,4 @@
-Coffee photographs downloaded from Unsplash for the Mola Kahve interface. Images are bundled into the Worker so visitors do not depend on an external image host.
+Coffee photographs downloaded from Unsplash for the Coffyman interface. Images are bundled into the Worker so visitors do not depend on an external image host.
 
 - latte.jpg: https://images.unsplash.com/photo-1572442388796-11668a67e53d
 - cappuccino.jpg: https://images.unsplash.com/photo-1534778101976-62847782c213
