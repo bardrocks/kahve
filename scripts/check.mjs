@@ -288,6 +288,42 @@ await YA('admin/status',{id:so,status:'preparing'});await YA('admin/status',{id:
 let mv=(await stk()).moves.filter(m=>m.ref===so);assert.equal(mv.length,2);assert.ok(mv.every(m=>m.reason==='order'&&m.delta<0));
 // iptal geri ekler, ikinci iptal tekrar eklemez, yeniden onay yine düşer
 await YA('admin/status',{id:so,status:'cancelled'});assert.equal(await qtyOf(cof),1000);assert.equal(await qtyOf(milk),2000);await YA('admin/status',{id:so,status:'cancelled'});assert.equal(await qtyOf(cof),1000);
+// -- ödendi: manuel siparişte ödeme + order_ref
+{const pm=async(who)=>{const b=(await YA('admin/data')).data.balances.find(x=>x.person===who.toLocaleLowerCase('tr-TR'));return b?b.remaining:0},pays=async()=>(await YA('admin/data')).data.payments;
+const base=await pm('Ayşe Öde'),baseB=await pm('Bora Öde');assert.equal(await qtyOf(cof),1000);
+const body={buyer:'Ayşe Öde',paid:true,paidMethod:'IBAN',items:[{id:'latte',recipient:'Ayşe Öde',payer:'Ayşe Öde',qty:2,sugar:0},{id:'espresso',recipient:'Bora Öde',payer:'Bora Öde',qty:1,sugar:0},{id:'latte',recipient:'Bora Öde',payer:'Ayşe Öde',qty:1,sugar:1}]};
+assert.equal((await Y('admin/order',body)).status,401);
+for(const bad of [{...body,paidMethod:'Çek'},{...body,status:'cancelled'}])assert.equal((await YA('admin/order',bad)).status,400);
+assert.equal((await YA('admin/data')).data.orders.filter(o=>o.buyer==='Ayşe Öde').length,0,'geçersiz istek kayıt bırakmaz');
+let r=await YA('admin/order',{...body,status:'pending'});assert.equal(r.status,200,JSON.stringify(r.data));assert.equal(r.data.paid,true);
+const o1=(await YA('admin/data')).data.orders.find(o=>o.id===r.data.id);assert.equal(o1.status,'confirmed');
+const lp=o1.items.filter(i=>i.payer==='ayşe öde').reduce((t,i)=>t+i.qty*i.price,0),ep=o1.items.find(i=>i.payer==='bora öde');
+assert.deepEqual(r.data.payments.map(x=>[x.person,x.amount]).sort(),[['ayşe öde',lp],['bora öde',ep.qty*ep.price]].sort());
+let pp=(await pays()).filter(x=>x.order_ref===r.data.id);assert.equal(pp.length,2);assert.ok(pp.every(x=>x.method==='IBAN'&&x.created===o1.created&&x.note==='Sipariş #'+r.data.id.slice(0,8)+' · ödendi'));
+assert.equal(await pm('Ayşe Öde'),base);assert.equal(await pm('Bora Öde'),baseB);
+assert.equal(await qtyOf(cof),1000-18*4,'pending+paid onaylanır ve stok düşer');
+// varsayılan yöntem Nakit; paid yoksa ödeme yok
+r=await YA('admin/order',{buyer:'Cem Öde',paid:true,items:[{id:'espresso',recipient:'Cem Öde',payer:'Cem Öde',qty:1,sugar:0}]});assert.equal(r.status,200);assert.equal((await pays()).find(x=>x.order_ref===r.data.id).method,'Nakit');
+const np=await YA('admin/order',{buyer:'Dilek Öde',items:[{id:'espresso',recipient:'Dilek Öde',payer:'Dilek Öde',qty:1,sugar:0}]});assert.equal(np.status,200);assert.equal(np.data.paid,undefined);assert.ok(!(await pays()).some(x=>x.order_ref===np.data.id));
+// order-paid: mevcut onaylı sipariş, idempotent
+assert.equal((await Y('admin/order-paid',{id:np.data.id})).status,401);assert.equal((await YA('admin/order-paid',{id:np.data.id,method:'Çek'})).status,400);assert.equal((await YA('admin/order-paid',{id:'yok'})).status,404);
+const dBase=await pm('Dilek Öde');assert.ok(dBase>0);r=await YA('admin/order-paid',{id:np.data.id,method:'Diğer'});assert.equal(r.status,200);assert.equal(await pm('Dilek Öde'),0);
+assert.equal((await YA('admin/order-paid',{id:np.data.id})).status,409);assert.equal((await pays()).filter(x=>x.order_ref===np.data.id).length,1);
+// pending sipariş order-paid ile onaylanır ve stok düşer
+const cBefore=await qtyOf(cof),pe=crypto.randomUUID();assert.equal((await Y('orders',{id:pe,buyer:'Ece Öde',contact:'05551112233',items:[{id:'espresso',recipient:'Ece Öde',payer:'Ece Öde',sugar:0,qty:1}]})).status,200);
+assert.equal(await qtyOf(cof),cBefore);r=await YA('admin/order-paid',{id:pe});assert.equal(r.status,200);assert.equal(r.data.status,'confirmed');assert.equal((await YA('admin/data')).data.orders.find(o=>o.id===pe).status,'confirmed');assert.equal(await qtyOf(cof),cBefore-18);assert.equal(await pm('Ece Öde'),0);
+// iptal ödemeleri kaldırır, kimse alacaklı görünmez; stok geri gelir
+const id1=(await YA('admin/data')).data.orders.find(o=>o.buyer==='Ayşe Öde').id;r=await YA('admin/status',{id:id1,status:'cancelled'});assert.equal(r.status,200);assert.equal(r.data.removedPayments,2);
+assert.ok(!(await pays()).some(x=>x.order_ref===id1));assert.equal(await pm('Ayşe Öde'),base);assert.equal(await pm('Bora Öde'),baseB);assert.ok(base>=0&&baseB>=0);
+assert.equal((await YA('admin/order-paid',{id:id1})).status,400);
+await YA('admin/status',{id:id1,status:'confirmed'});assert.ok(!(await pays()).some(x=>x.order_ref===id1),'tekrar onay ödemeyi geri getirmez');
+// yedek order_ref taşır; eski yedek yüklenir
+const bkp=(await YA('admin/backup')).data;assert.ok(bkp.payments.some(x=>x.order_ref===np.data.id));
+const rs=async(d,b)=>{const rr=await worker.fetch(new Request('https://mola.test/api/admin/restore',{method:'POST',headers:{Origin:'https://mola.test','X-Mola-Device':'d'.repeat(64),Authorization:'Bearer test-key','Content-Type':'application/json'},body:JSON.stringify(b)}),{DB:d,ADMIN_KEY:'test-key'});return rr.status};
+{const F=await freshDB();assert.equal(await rs(F,bkp),200);const got=(await F.prepare('SELECT order_ref FROM payments WHERE order_ref=?').bind(np.data.id).all()).results;assert.equal(got.length,1)}
+{const o=structuredClone(bkp);for(const x of o.payments)delete x.order_ref;const F=await freshDB();assert.equal(await rs(F,o),200);assert.equal(Number((await F.prepare('SELECT COUNT(*) c FROM payments').first()).c),o.payments.length)}
+for(const o of (await YA('admin/data')).data.orders.filter(o=>/Öde$/.test(o.buyer)&&o.status!=='cancelled'))await YA('admin/status',{id:o.id,status:'cancelled'});assert.equal(await qtyOf(cof),1000);
+}
 mv=(await stk()).moves.filter(m=>m.ref===so);assert.equal(mv.filter(m=>m.reason==='cancel').length,2);
 await YA('admin/status',{id:so,status:'confirmed'});assert.equal(await qtyOf(cof),1000-36);await YA('admin/status',{id:so,status:'cancelled'});assert.equal(await qtyOf(cof),1000);
 // onaylanmamış siparişin iptali stok eklemez
