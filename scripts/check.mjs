@@ -226,6 +226,13 @@ for(const bad of [{amount:0},{amount:1.5},{amount:'5'},{amount:10000001},{amount
 assert.equal((await A('admin/payment-update',{id:first.id,amount:250,note:'düzeltildi',method:'Nakit'})).status,200);assert.equal(await rem(nm),230);
 pays=(await A('admin/data')).data.payments;let u=pays.find(p=>p.id===first.id);assert.equal(u.amount,250);assert.equal(u.note,'düzeltildi');assert.equal(u.method,'Nakit');assert.equal(u.created,first.created);assert.equal(u.person,'kısmi ödeyen');
 assert.equal((await A('admin/payment-update',{id:first.id,amount:250,created:past3})).status,200);u=(await A('admin/data')).data.payments.find(p=>p.id===first.id);assert.equal(u.created,past3);assert.equal(u.method,'Nakit','method verilmezse korunur');assert.equal(u.note,'');
+// indirimle hesap kapatma
+{const dn='İndirim Deneme',dk=dn.toLocaleLowerCase('tr-TR');assert.equal((await A('admin/order',{buyer:dn,items:[{id:rid,recipient:dn,payer:dn,qty:4,sugar:0}]})).status,200);assert.equal(await rem(dn),400);
+for(const bad of [{discount:0},{discount:-5},{discount:1.5},{discount:'5'},{discount:301}])assert.equal((await A('admin/payment',{person:dn,amount:100,...bad})).status,400,JSON.stringify(bad));assert.equal(await rem(dn),400);
+assert.equal((await A('admin/payment',{person:dn,amount:100,method:'Nakit',discount:300})).status,200);assert.equal(await rem(dn),0);
+const dp=(await A('admin/data')).data.payments.filter(p=>p.person===dk);assert.equal(dp.length,2);assert.ok(dp.some(p=>p.method==='Nakit'&&p.amount===100));assert.ok(dp.some(p=>p.method==='İndirim'&&p.amount===300&&/İndirim/.test(p.note)));
+assert.equal((await A('admin/payment-update',{id:dp.find(p=>p.method==='İndirim').id,amount:250})).status,200);assert.equal(await rem(dn),50);
+for(const x of dp)assert.equal((await A('admin/payment-delete',{id:x.id})).status,200);assert.equal(await rem(dn),400)}
 assert.equal((await A('admin/payment-update',{id:first.id,amount:250,method:''})).status,200);assert.equal((await A('admin/data')).data.payments.find(p=>p.id===first.id).method,null);
 // fazla ödeme -> negatif kalan
 const ov='Fazla Ödeyen';assert.equal((await A('admin/order',{buyer:ov,items:[{id:rid,recipient:ov,payer:ov,qty:1,sugar:0}]})).status,200);assert.equal((await A('admin/payment',{person:ov,amount:160,method:'Nakit'})).status,200);assert.equal(await rem(ov),-60);
