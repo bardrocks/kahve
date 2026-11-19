@@ -6,7 +6,8 @@
     "build": "node scripts/build.mjs",
     "dev": "node scripts/dev.mjs",
     "check": "node scripts/check.mjs",
-    "check:pg": "node scripts/check.mjs --pg"
+    "check:pg": "node scripts/check.mjs --pg",
+    "deploy": "wrangler d1 migrations apply coffyman --remote && wrangler deploy"
   },
   "dependencies": {
     "@netlify/blobs": "^11.1.9",

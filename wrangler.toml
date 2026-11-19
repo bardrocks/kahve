@@ -1,0 +1,20 @@
+name = "coffyman"
+main = "cloudflare/worker.mjs"
+compatibility_date = "2025-11-01"
+workers_dev = true
+
+[build]
+command = "node scripts/build.mjs"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "coffyman"
+database_id = "91b871cd-1f62-4451-b9a6-99e9cca84542"
+migrations_dir = "drizzle"
+
+[[kv_namespaces]]
+binding = "BACKUPS_KV"
+id = "510e1c1bb1bb490b8135aa575edf84c5"
+
+[triggers]
+crons = ["0 0 * * *"]
