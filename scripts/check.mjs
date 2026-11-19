@@ -226,6 +226,13 @@ for(const bad of [{amount:0},{amount:1.5},{amount:'5'},{amount:10000001},{amount
 assert.equal((await A('admin/payment-update',{id:first.id,amount:250,note:'düzeltildi',method:'Nakit'})).status,200);assert.equal(await rem(nm),230);
 pays=(await A('admin/data')).data.payments;let u=pays.find(p=>p.id===first.id);assert.equal(u.amount,250);assert.equal(u.note,'düzeltildi');assert.equal(u.method,'Nakit');assert.equal(u.created,first.created);assert.equal(u.person,'kısmi ödeyen');
 assert.equal((await A('admin/payment-update',{id:first.id,amount:250,created:past3})).status,200);u=(await A('admin/data')).data.payments.find(p=>p.id===first.id);assert.equal(u.created,past3);assert.equal(u.method,'Nakit','method verilmezse korunur');assert.equal(u.note,'');
+// düzenlemede indirim: 250'lik ödemeyi 200 yap, kalan 280'i indirimle kapat
+assert.equal((await A('admin/payment-update',{id:first.id,amount:200,discount:281})).status,400);assert.equal(await rem(nm),230);
+assert.equal((await A('admin/payment-update',{id:first.id,amount:200,discount:1.5})).status,400);
+{const r=await A('admin/payment-update',{id:first.id,amount:200,discount:280});assert.equal(r.status,200);assert.equal(r.data.discount,280);assert.equal(await rem(nm),0);
+const dpay=(await A('admin/data')).data.payments.find(p=>p.person==='kısmi ödeyen'&&p.method==='İndirim');assert.equal(dpay.amount,280);
+assert.equal((await A('admin/payment-update',{id:dpay.id,amount:280,discount:10})).status,400,'indirim kaydına ek indirim yok');
+await A('admin/payment-delete',{id:dpay.id});assert.equal((await A('admin/payment-update',{id:first.id,amount:250,created:past3})).status,200);assert.equal(await rem(nm),230)}
 // indirimle hesap kapatma
 {const dn='İndirim Deneme',dk=dn.toLocaleLowerCase('tr-TR');assert.equal((await A('admin/order',{buyer:dn,items:[{id:rid,recipient:dn,payer:dn,qty:4,sugar:0}]})).status,200);assert.equal(await rem(dn),400);
 for(const bad of [{discount:0},{discount:-5},{discount:1.5},{discount:'5'},{discount:301}])assert.equal((await A('admin/payment',{person:dn,amount:100,...bad})).status,400,JSON.stringify(bad));assert.equal(await rem(dn),400);
