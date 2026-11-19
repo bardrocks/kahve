@@ -8,7 +8,8 @@ Canlı site: https://coffyman.bardrock.workers.dev (eski https://coffyman.netlif
 
 - Worker girişi: `cloudflare/worker.mjs` (aynı `worker/index.js` kodunu D1 veritabanı ve KV yedek deposuyla çalıştırır). Ayarlar: `wrangler.toml`.
 - Veritabanı: Cloudflare D1 (`coffyman`). Şema `drizzle/` altındaki migration'lardır. D1 ayrıca son 30 günün herhangi bir anına geri dönmeyi (Time Travel) destekler.
-- Yayınlamak için (Cloudflare API anahtarı ortamda tanımlıyken):
+- Otomatik yayın: Cloudflare Workers Builds `bardrocks/kahve` deposunun `main` dalına bağlıdır; `main`'e her birleştirmede site kendiliğinden derlenip yayınlanır. Önerilen deploy komutu: `npm run deploy` (önce D1 migration'larını uygular, sonra yayınlar).
+- Elle yayınlamak için (Cloudflare API anahtarı ortamda tanımlıyken):
   ```
   npx wrangler d1 migrations apply coffyman --remote
   npx wrangler deploy
