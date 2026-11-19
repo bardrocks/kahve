@@ -401,4 +401,47 @@ _resetFx();r=await fx(c.env);assert.deepEqual([r.data.usdTry,r.data.source,r.dat
 // BACKUPS'ta saklanan son kur
 const store=memoryBackups();_resetFx();await fx(mkf(u=>ok(xml),{BACKUPS:store}).env);assert.equal((await store.get('fx/latest.json')).usdTry,42.2345);_resetFx();r=await fx(mkf(()=>fail(),{BACKUPS:store}).env);assert.equal(r.data.usdTry,42.2345);assert.equal(r.data.stale,true);
 _resetFx();const sane=mkf(u=>u.includes('tcmb')?ok(xml.replace('42.2345','0.0001')):ok(JSON.stringify({rates:{TRY:-3}})));assert.equal((await fx(sane.env)).data.usdTry,null);_resetFx()}
+// --- özel fiyatlar (person_prices) ---
+{const E=(d,device='a'.repeat(64))=>async(path,body,auth=true)=>{const r=await worker.fetch(new Request('https://mola.test/api/'+path,{method:body?'POST':'GET',headers:{Origin:'https://mola.test','X-Mola-Device':device,...(auth?{Authorization:'Bearer test-key'}:{}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})}),{DB:d,ADMIN_KEY:'test-key'});return {status:r.status,data:await r.json().catch(()=>null)}};
+const D=await freshDB(),Q=E(D),QB=E(D,'b'.repeat(64));const st=(await Q('menu',null,false)).data;st.products.find(p=>p.id==='latte').price=150;st.lactoseFreeExtra=10;assert.equal((await Q('admin/settings',st)).status,200);
+const bal=async k=>(await Q('admin/data')).data.balances.find(b=>b.person===k);
+// yetki + doğrulama
+assert.equal((await Q('admin/person-price',{name:'Nastya',productId:'latte',price:120},false)).status,401);assert.equal((await Q('admin/person-price-delete',{name:'Nastya',productId:'latte'},false)).status,401);
+for(const bad of [{name:'Nastya',productId:'latte',price:0},{name:'Nastya',productId:'latte',price:10001},{name:'Nastya',productId:'latte',price:12.5},{name:'Nastya',productId:'latte',price:'120'},{name:'Nastya',productId:'latte'},{name:'Nastya',productId:'yok-boyle',price:100},{name:'  ',productId:'latte',price:100}])assert.equal((await Q('admin/person-price',bad)).status,400);
+assert.equal((await Q('admin/data')).data.personPrices.length,0);
+assert.equal((await Q('admin/person-price',{name:'  Nastya ',productId:'latte',price:120})).status,200);
+let pp=(await Q('admin/data')).data.personPrices;assert.equal(pp.length,1);assert.deepEqual([pp[0].name_key,pp[0].product_id,pp[0].price,pp[0].name],['nastya','latte',120,'Nastya']);
+// müşteri siparişi: ödeyen Nastya -> 120; başkası -> 150; istemci fiyatı yok sayılır
+const o1=crypto.randomUUID(),o2=crypto.randomUUID(),o3=crypto.randomUUID();
+assert.equal((await Q('orders',{id:o1,buyer:'Nastya',contact:'05548955011',items:[{id:'latte',recipient:'Nastya',payer:'nastya',sugar:0,qty:1,price:1}]},false)).status,200);
+assert.equal((await Q('orders',{id:o2,buyer:'Can',contact:'05548955011',items:[{id:'latte',recipient:'Nastya',payer:'Can',sugar:0,qty:1}]},false)).status,200);
+assert.equal((await Q('orders',{id:o3,buyer:'Nastya',contact:'05548955011',items:[{id:'latte',recipient:'Nastya',payer:'Nastya',sugar:0,qty:1,milk:'lactose_free'}]},false)).status,200);
+let od=(await Q('admin/data')).data.orders;const it=id=>od.find(o=>o.id===id).items[0];
+assert.deepEqual([it(o1).price,it(o1).listPrice,it(o1).special],[120,150,true]);assert.equal(it(o2).price,150);assert.equal(it(o2).special,undefined);assert.equal(it(o2).listPrice,undefined);assert.deepEqual([it(o3).price,it(o3).listPrice,it(o3).special],[130,160,true]);assert.equal(od.find(o=>o.id===o1).total,120);
+for(const id of [o1,o2,o3])await Q('admin/status',{id,status:'confirmed'});
+// admin siparişi de uygular
+r=await Q('admin/order',{buyer:'Mehmet',items:[{id:'latte',recipient:'Nastya',payer:'Nastya',qty:2,sugar:0}]});assert.equal(r.status,200);assert.equal(r.data.total,240);
+assert.equal((await Q('admin/data')).data.orders.find(o=>o.id===r.data.id).items[0].special,true);
+// borç özel fiyat üzerinden: 120 + 130 + 240
+assert.equal((await bal('nastya')).total,490);assert.equal((await bal('can')).total,150);
+// menü fiyatına eşit fiyat kaydı siler
+r=await Q('admin/person-price',{name:'Nastya',productId:'latte',price:150});assert.equal(r.status,200);assert.equal((await Q('admin/data')).data.personPrices.length,0);
+// geçmiş sipariş özel fiyat değişince değişmez
+assert.equal((await Q('admin/person-price',{name:'Nastya',productId:'latte',price:100})).status,200);od=(await Q('admin/data')).data.orders;assert.equal(it(o1).price,120);assert.equal((await bal('nastya')).total,490);
+r=await Q('admin/order',{buyer:'Nastya',items:[{id:'latte',recipient:'Nastya',payer:'Nastya',qty:1,sugar:0}]});assert.equal(r.data.total,100);
+// açık silme
+assert.equal((await Q('admin/person-price',{name:'Nastya',productId:'espresso',price:50})).status,200);assert.equal((await Q('admin/person-price-delete',{name:' nastya',productId:'espresso'})).status,200);assert.equal((await Q('admin/data')).data.personPrices.length,1);
+// yeniden adlandırma taşır
+const sc=await Q('admin/staff',{name:'Nastya',phone:'05541112233'});assert.equal(sc.status,200);assert.equal((await Q('admin/staff',{id:sc.data.id,name:'Nastya Ivanova',phone:'05541112233'})).status,200);
+pp=(await Q('admin/data')).data.personPrices;assert.equal(pp.length,1);assert.deepEqual([pp[0].name_key,pp[0].name,pp[0].price],['nastya ıvanova','Nastya Ivanova',100]);
+// /api/memory: yalnızca kendi cihazına
+let mm=await Q('memory',{name:'Nastya Ivanova'},false);assert.equal(mm.status,200);assert.deepEqual(mm.data.prices,{latte:100});mm=await Q('memory',{name:'Can'},false);assert.equal(mm.data.prices,undefined);
+const lk=await Q('admin/personal-link',{name:'Nastya Ivanova'});assert.equal(lk.status,200);assert.equal((await Q('claim-link',{code:lk.data.code},false)).data.name,'Nastya Ivanova');
+mm=await Q('memory',{name:'Nastya Ivanova'},false);assert.deepEqual(mm.data.prices,{latte:100});mm=await QB('memory',{name:'Nastya Ivanova'},false);assert.equal(mm.status,409);assert.equal(mm.data.prices,undefined);assert.deepEqual(mm.data.favorites,[]);
+// yedek/restore
+const bk=(await Q('admin/backup')).data;assert.ok(Array.isArray(bk.person_prices));assert.equal(bk.person_prices.length,1);
+const F1=await freshDB(),Z1=E(F1);let rr=await Z1('admin/restore',bk);assert.equal(rr.status,200);assert.equal(rr.data.result.person_prices.added,1);assert.equal((await Z1('admin/data')).data.personPrices[0].price,100);rr=await Z1('admin/restore',bk);assert.equal(rr.data.result.person_prices.added,0);
+{const old=structuredClone(bk);delete old.person_prices;const F0=await freshDB();const r0=await E(F0)('admin/restore',old);assert.equal(r0.status,200);assert.equal(r0.data.result.person_prices.added,0);const badBk=structuredClone(bk);badBk.person_prices[0].price=0;assert.equal((await E(F0)('admin/restore',badBk)).status,400)}
+// menüden ürün silinirse kayıt kalır, uygulanmaz
+{const cur=(await Q('admin/data')).data.settings;await Q('admin/person-price',{name:'Nastya Ivanova',productId:'espresso',price:60});cur.products=cur.products.filter(p=>p.id!=='espresso');assert.equal((await Q('admin/settings',cur)).status,200);assert.ok((await Q('admin/data')).data.personPrices.some(x=>x.product_id==='espresso'));assert.equal((await Q('orders',{id:crypto.randomUUID(),buyer:'Nastya Ivanova',contact:'05548955011',items:[{id:'espresso',recipient:'x',payer:'Nastya Ivanova',sugar:0,qty:1}]},false)).status,400)}}
 await stopPg();console.log((PG?'[postgres] ':'[sqlite] ')+'PASS: my-orders (no leaks), reminder template, PWA manifest/sw/icons, stock (recipes, idempotent deduct, cancel restore, hide-out-of-stock, backup), FX fallback; balances survive product delete/price change/menu resave/rename, backup+restore idempotent, redeploy, migration safety;  menu add/edit/delete, validation, lactose-free milk snapshot, legacy settings, person prefs + auto backups, device-bound links, simultaneous first claim, forwarded link anonymity, reserved names, protected orders, new guest identity, admin reset/revocation, contact updates, ordering and staff regression');
