@@ -2,12 +2,20 @@
 
 Kahve siparişi, WhatsApp sipariş özeti, kişi hesapları, tahsilatlar, personel rehberi ve tarayıcıya bağlı kişisel bağlantılar.
 
-## Yayın (Netlify)
+## Yayın (Cloudflare Workers + D1)
 
-Canlı site Netlify üzerinde çalışır. Depo Netlify'a bağlıysa GitHub'a push yapmak siteyi otomatik yayınlar (`npm run build`, ardından `netlify/functions/app.mjs` fonksiyonu tüm yolları karşılar).
+Canlı site: https://coffyman.bardrock.workers.dev (eski https://coffyman.netlify.app adresi buraya yönlendirilir).
 
-- Veritabanı: Netlify Database (Postgres). Şema `netlify/database/migrations/` altındaki migration dosyalarından deploy sırasında otomatik uygulanır.
-- Yönetim şifresi: Netlify > Project configuration > Environment variables bölümünde `ADMIN_KEY` adıyla (Functions kapsamı, secret) tanımlanır. Tanımlı değilse yönetim uçları 401 döner.
+- Worker girişi: `cloudflare/worker.mjs` (aynı `worker/index.js` kodunu D1 veritabanı ve KV yedek deposuyla çalıştırır). Ayarlar: `wrangler.toml`.
+- Veritabanı: Cloudflare D1 (`coffyman`). Şema `drizzle/` altındaki migration'lardır. D1 ayrıca son 30 günün herhangi bir anına geri dönmeyi (Time Travel) destekler.
+- Yayınlamak için (Cloudflare API anahtarı ortamda tanımlıyken):
+  ```
+  npx wrangler d1 migrations apply coffyman --remote
+  npx wrangler deploy
+  ```
+- Yönetim şifresi: Worker secret `ADMIN_KEY` (`npx wrangler secret put ADMIN_KEY` veya Cloudflare paneli > Workers > coffyman > Settings > Variables).
+- Otomatik yedek: her gece UTC 00:00 (TR 03:00) cron ile ve yazma işlemlerinden sonra en fazla saatte bir, KV deposuna (`BACKUPS_KV`).
+- Netlify: artık yalnızca yönlendirme yapar (`netlify.toml`, `netlify-redirect/_redirects`). `netlify/` altındaki fonksiyon ve Postgres dosyaları eski kurulumun kaydıdır; Postgres testleri (`npm run check:pg`) uyumluluk için durur.
 
 ## Yerel çalıştırma
 
@@ -40,11 +48,11 @@ Testler: `npm run build && npm run check` (SQLite) ve `npm run check:pg` (yerel 
 - scripts/dev.mjs: Windows/Linux üzerinde yerel deneme sunucusu
 - scripts/check.mjs: işlev kontrolleri (node scripts/check.mjs)
 
-Canlı kayıtlar Netlify Database'de saklanır. Bu ZIP kaynak kod ve görsellerin kopyasıdır; canlı veri yedeği değildir. Kaynakları indirmek canlı yayını değiştirmez.
+Canlı kayıtlar Cloudflare D1 veritabanında saklanır. Bu ZIP kaynak kod ve görsellerin kopyasıdır; canlı veri yedeği değildir. Kaynakları indirmek canlı yayını değiştirmez.
 
 ## Güncelleme yaparken verileri koruma
 
-- Siparişler, borçlar, tahsilatlar, personel ve ayarlar kod paketinde değil, canlı veritabanında (Netlify Database) durur. Kodu yeniden yayınlamak bu verileri silmez veya sıfırlamaz.
+- Siparişler, borçlar, tahsilatlar, personel ve ayarlar kod paketinde değil, canlı veritabanında (Cloudflare D1) durur. Kodu yeniden yayınlamak bu verileri silmez veya sıfırlamaz.
 - Her yayından önce Yönetim paneli > Ayarlar > "Yedek indir" ile tam yedek alın (coffyman-yedek-YYYY-MM-DD.json). "Yedek yükle" yalnızca eksik kayıtları ekler; mevcut kayıtları silmez veya ezmez.
 - Şema değişiklikleri (hem netlify/database/migrations/ hem de yerel test için drizzle/ altına, aynı içerikle) yalnızca yeni numaralı, ekleme yapan (additive) migration olmalıdır (örn. netlify/database/migrations/<rakamlar>_ad.sql: CREATE TABLE IF NOT EXISTS, ALTER TABLE ... ADD COLUMN). Mevcut migration dosyalarını değiştirmeyin; DROP, DELETE, TRUNCATE veya tabloyu yeniden oluşturma kullanmayın. scripts/check.mjs bunları otomatik reddeder.
 - Müşteri borcu siparişlerin (ürün adı ve fiyat anlık kopya olarak saklanır) ve tahsilatların toplamından hesaplanır; /api/admin/data yanıtındaki `balances` aynı hesabı sunucuda yapar. Menüden ürün silmek veya fiyat değiştirmek eski borçları etkilemez.
