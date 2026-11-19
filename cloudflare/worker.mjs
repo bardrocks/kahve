@@ -12,6 +12,9 @@ export function kvBackups(kv){return {
 
 export default {
   async fetch(req,env,ctx){
+    // Ek yönetim şifreleri (ADMIN_KEY_2 ...): eşleşirse istek ana şifreyle gelmiş gibi işlenir.
+    const extra=[env.ADMIN_KEY_2,env.ADMIN_KEY_3].filter(Boolean),auth=req.headers.get('Authorization')||'';
+    if(env.ADMIN_KEY&&extra.some(k=>auth==='Bearer '+k)){const h=new Headers(req.headers);h.set('Authorization','Bearer '+env.ADMIN_KEY);req=new Request(req,{headers:h})}
     const BACKUPS=env.BACKUPS_KV?kvBackups(env.BACKUPS_KV):undefined;
     const BACKUP_HOOK=BACKUPS?()=>ctx.waitUntil(hourlyBackup({db:env.DB,store:BACKUPS,buildBackup})):undefined;
     const BACKUP_NOW=BACKUPS?async()=>{const b=await buildBackup(env.DB),at=new Date().toISOString();await BACKUPS.set('hourly/latest.json',b,{at});return {key:'hourly/latest.json',orders:b.orders.length,at}}:undefined;
