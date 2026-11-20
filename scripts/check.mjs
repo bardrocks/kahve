@@ -559,4 +559,77 @@ const bk=await buildBackup(D);assert.equal(bk.quick_orders.length,3);const F=awa
 assert.equal((await E(await freshDB())('admin/restore',{...bk,quick_orders:[{id:'x'}]})).status,400);
 // sil
 assert.equal((await Q('admin/quick-order-delete',{id:qid})).status,200);assert.equal((await dat()).quickOrders.length,2);assert.equal((await dat()).orders.filter(x=>x.buyer==='Dinara').length,4);}
+// --- milkMode: sadece laktozsuz süt ---
+{const E=(d,device='a'.repeat(64))=>async(path,body,auth=true)=>{const r=await worker.fetch(new Request('https://mola.test/api/'+path,{method:body?'POST':'GET',headers:{Origin:'https://mola.test','X-Mola-Device':device,...(auth?{Authorization:'Bearer test-key'}:{}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})}),{DB:d,ADMIN_KEY:'test-key'});return {status:r.status,data:await r.json().catch(()=>null)}};
+const D=await freshDB(),Q=E(D),dat=async()=>(await Q('admin/data')).data;
+let st=(await Q('menu',null,false)).data;assert.equal(st.milkMode,'choice');assert.equal((await dat()).settings.milkMode,'choice');
+const stk=async()=>(await dat()).stock,qtyOf=async id=>(await stk()).items.find(x=>x.id===id).qty,item=async(n,u,q)=>(await Q('admin/stock-item',{name:n,unit:u,qty:q,minQty:0})).data.id;
+const cof=await item('Kahve çekirdeği','g',1000),milk=await item('Süt','ml',2000),lf=await item('Laktozsuz süt','ml',1000);
+const prods=st.products.map(({available,...p})=>p.id==='latte'?{...p,price:150,recipe:[{itemId:cof,amount:18},{itemId:milk,amount:200,lactoseFreeItemId:lf}]}:p);
+const save=b=>Q('admin/settings',{name:st.name,phone:st.phone,products:prods,...b});
+for(const bad of ['x',1,null,''])assert.equal((await save({milkMode:bad})).status,400,String(bad));
+assert.equal((await save({lactoseFreeExtra:10,hideOutOfStock:true,reminderTemplate:'Merhaba {name}'})).status,200);
+// choice: eski davranış
+const mk=(id,milkV,o={})=>({id,recipient:'Ali',payer:'Ali',qty:1,sugar:0,...(milkV?{milk:milkV}:{}),...o});
+let r=await Q('admin/order',{buyer:'Ali',status:'delivered',items:[mk('latte','normal')]});assert.equal(r.status,200);let o=(await dat()).orders.find(x=>x.id===r.data.id);assert.equal(o.items[0].milk,'normal');assert.equal(o.items[0].price,150);const oldId=r.data.id;
+// lactose_free_only kaydı + diğer alanlar korunur
+assert.equal((await save({milkMode:'lactose_free_only'})).status,200);st=(await Q('menu',null,false)).data;assert.equal(st.milkMode,'lactose_free_only');assert.equal(st.lactoseFreeExtra,10);assert.equal(st.reminderTemplate,undefined);
+{const s2=(await dat()).settings;assert.equal(s2.milkMode,'lactose_free_only');assert.equal(s2.hideOutOfStock,true);assert.equal(s2.reminderTemplate,'Merhaba {name}');assert.equal(s2.lactoseFreeExtra,10)}
+// menü yeniden kaydı (milkMode göndermeden) modu bozmaz
+assert.equal((await Q('admin/settings',{name:st.name,phone:st.phone,products:prods})).status,200);assert.equal((await Q('menu',null,false)).data.milkMode,'lactose_free_only');
+// müşteri siparişi: normal gönderilse de laktozsuz, ekstra ücret, sütsüz ürün normal / 400 yok
+const co=async(items)=>{const id=crypto.randomUUID(),r=await Q('orders',{id,buyer:'Ali',contact:'05548955011',items},false);return {r,id}};
+{const {r:cr,id}=await co([mk('latte','normal'),mk('latte'),mk('americano','normal'),mk('americano'),mk('mocha','lactose_free')]);assert.equal(cr.status,200,JSON.stringify(cr.data));const it=(await dat()).orders.find(x=>x.id===id).items;assert.deepEqual(it.map(i=>i.milk),['lactose_free','lactose_free','normal','normal','lactose_free']);assert.equal(it[0].price,160);assert.equal(it[2].price,st.products.find(p=>p.id==='americano').price);assert.equal(it[4].price,st.products.find(p=>p.id==='mocha').price+10)}
+assert.equal((await co([mk('americano','bozuk')])).r.status,400);
+// admin sipariş
+r=await Q('admin/order',{buyer:'Ali',status:'delivered',items:[mk('latte','normal'),mk('americano','lactose_free')]});assert.equal(r.status,200,JSON.stringify(r.data));let ai=(await dat()).orders.find(x=>x.id===r.data.id);assert.deepEqual(ai.items.map(i=>i.milk),['lactose_free','normal']);assert.equal(ai.items[0].price,160);
+// stok: laktozsuz kalemden düşer
+const lf0=await qtyOf(lf),mk0=await qtyOf(milk);{const {r:c2,id}=await co([mk('latte','normal')]);assert.equal(c2.status,200);assert.equal((await Q('admin/status',{id,status:'preparing'})).status,200);assert.equal(await qtyOf(lf),lf0-200);assert.equal(await qtyOf(milk),mk0)}
+// order-update: yeni satır laktozsuz olur; eski normal kayıt satırı korunur
+r=await Q('admin/order-update',{id:r.data.id,items:[mk('latte','normal'),mk('mocha','normal')]});assert.equal(r.status,200,JSON.stringify(r.data));ai=(await dat()).orders.find(x=>x.id===ai.id);assert.deepEqual(ai.items.map(i=>[i.id,i.milk]),[['latte','lactose_free'],['mocha','lactose_free']]);
+r=await Q('admin/order-update',{id:oldId,items:[mk('latte','normal'),mk('cappuccino','normal')]});assert.equal(r.status,200,JSON.stringify(r.data));o=(await dat()).orders.find(x=>x.id===oldId);assert.deepEqual(o.items.map(i=>[i.id,i.milk]),[['latte','normal'],['cappuccino','lactose_free']]);assert.equal(o.items[0].price,150);
+// hızlı sipariş
+{const q=await Q('admin/quick-order',{label:'Ali Latte',buyer:'Ali',items:[mk('latte','normal')]});assert.equal(q.status,200,JSON.stringify(q.data));const run=await Q('admin/quick-order-run',{id:q.data.id});assert.equal(run.status,200,JSON.stringify(run.data));const qo=(await dat()).orders.find(x=>x.id===run.data.id);assert.equal(qo.items[0].milk,'lactose_free');assert.equal(qo.items[0].price,160)}
+// ekstra 0 → fiyat aynı
+assert.equal((await save({milkMode:'lactose_free_only',lactoseFreeExtra:0})).status,200);r=await Q('admin/order',{buyer:'Ali',items:[mk('latte','normal')]});assert.equal((await dat()).orders.find(x=>x.id===r.data.id).items[0].price,150);assert.equal((await dat()).orders.find(x=>x.id===r.data.id).items[0].milk,'lactose_free');
+// geçmiş sipariş değişmedi
+assert.equal((await dat()).orders.find(x=>x.id===oldId).items[0].milk,'normal');
+// choice'a dönünce eski davranış
+assert.equal((await save({milkMode:'choice',lactoseFreeExtra:10})).status,200);assert.equal((await Q('menu',null,false)).data.milkMode,'choice');
+{const {r:c3,id}=await co([mk('latte','normal'),mk('latte','lactose_free')]);assert.equal(c3.status,200);const it=(await dat()).orders.find(x=>x.id===id).items;assert.deepEqual(it.map(i=>i.milk),['normal','lactose_free']);assert.equal(it[0].price,150);assert.equal(it[1].price,160)}
+assert.equal((await co([mk('americano','lactose_free')])).r.status,400);
+// eski kayıt (milkMode yok) → choice
+await D.prepare('UPDATE settings SET data=? WHERE id=1').bind(JSON.stringify({name:st.name,phone:st.phone,products:prods})).run();assert.equal((await Q('menu',null,false)).data.milkMode,'choice');}
+// --- balance-adjust (Düzeltme) ---
+{const E=(d,device='a'.repeat(64))=>async(path,body,auth=true)=>{const r=await worker.fetch(new Request('https://mola.test/api/'+path,{method:body?'POST':'GET',headers:{Origin:'https://mola.test','X-Mola-Device':device,...(auth?{Authorization:'Bearer test-key'}:{}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})}),{DB:d,ADMIN_KEY:'test-key'});return {status:r.status,data:await r.json().catch(()=>null)}};
+const D=await freshDB(),Q=E(D),dat=async()=>(await Q('admin/data')).data,rem=async k=>{const b=(await dat()).balances.find(x=>x.person===k);return b?b.remaining:0};
+const price=(await Q('menu',null,false)).data.products.find(p=>p.id==='espresso').price;
+assert.equal((await Q('admin/order',{buyer:'Düzel Kişi',status:'delivered',items:[{id:'espresso',recipient:'Düzel Kişi',payer:'Düzel Kişi',qty:3,sugar:0}]})).status,200);const d0=3*price;assert.equal(await rem('düzel kişi'),d0);
+const adj=(b,auth=true)=>Q('admin/balance-adjust',{person:'Düzel Kişi',...b},auth);
+assert.equal((await adj({target:100,note:'x'},false)).status,401);
+for(const bad of [{target:100},{target:100,note:'  '},{target:'100',note:'x'},{target:1.5,note:'x'},{target:10000001,note:'x'},{target:-1000001,note:'x'},{note:'x'},{target:5,note:'x'.repeat(0)}])assert.equal((await adj(bad)).status,400,JSON.stringify(bad));
+assert.equal((await Q('admin/balance-adjust',{person:'  ',target:5,note:'x'})).status,400);
+assert.equal((await adj({target:d0,note:'aynı'})).status,400);
+// azalt
+let r=await adj({target:d0-50,note:'eski defter'});assert.equal(r.status,200,JSON.stringify(r.data));assert.equal(r.data.amount,50);assert.equal(await rem('düzel kişi'),d0-50);let pay=(await dat()).payments.find(x=>x.id===r.data.id);assert.equal(pay.method,'Düzeltme');assert.equal(pay.amount,50);assert.equal(pay.note,'eski defter');const id1=r.data.id;
+// artır → negatif amount
+r=await adj({target:d0+30,note:'hatalı giriş'});assert.equal(r.status,200);assert.equal(r.data.amount,-80);assert.equal(await rem('düzel kişi'),d0+30);pay=(await dat()).payments.find(x=>x.id===r.data.id);assert.equal(pay.amount,-80);assert.equal(pay.method,'Düzeltme');const id2=r.data.id;
+// sıfır ve alacaklı hedef
+r=await adj({target:0,note:'kapat'});assert.equal(r.status,200);assert.equal(await rem('düzel kişi'),0);const id3=r.data.id;
+r=await adj({target:-40,note:'avans devri'});assert.equal(r.status,200);assert.equal(await rem('düzel kişi'),-40);
+assert.equal((await adj({target:-40,note:'aynı'})).status,400);
+// diğer yöntemlerde negatif/0 tutar 400
+for(const amount of [-5,0])assert.equal((await Q('admin/payment',{person:'Düzel Kişi',amount,method:'Nakit'})).status,400);
+assert.equal((await Q('admin/payment',{person:'Düzel Kişi',amount:5,method:'Düzeltme'})).status,400);
+// düzeltme düzenle / sil
+assert.equal((await Q('admin/payment-update',{id:id2,amount:-100,note:'yeni not'})).status,200);pay=(await dat()).payments.find(x=>x.id===id2);assert.equal(pay.amount,-100);assert.equal(pay.method,'Düzeltme');assert.equal(pay.note,'yeni not');assert.equal(await rem('düzel kişi'),-20);
+assert.equal((await Q('admin/payment-update',{id:id2,amount:0,note:'x'})).status,400);assert.equal((await Q('admin/payment-update',{id:id2,amount:-10,method:'Nakit',discount:5})).status,400);
+assert.equal((await Q('admin/payment-update',{id:id2,amount:-10000001})).status,400);
+assert.equal((await Q('admin/payment-delete',{id:id3})).status,200);assert.equal(await rem('düzel kişi'),d0+10);
+// normal ödeme düzenlemede negatif hâlâ 400
+{const pr=await Q('admin/payment',{person:'Düzel Kişi',amount:10,method:'Nakit'});assert.equal(pr.status,200);const pid=(await dat()).payments.find(x=>x.method==='Nakit'&&x.person==='düzel kişi').id;assert.equal((await Q('admin/payment-update',{id:pid,amount:-10})).status,400)}
+// yedek / restore: negatif Düzeltme taşınır, diğerleri reddedilir
+{const bk=(await Q('admin/backup')).data;assert.ok(bk.payments.some(x=>x.method==='Düzeltme'&&x.amount<0));const F=await freshDB(),Z=E(F);const rs=await Z('admin/restore',bk);assert.equal(rs.status,200,JSON.stringify(rs.data));assert.ok((await Z('admin/data')).data.payments.some(x=>x.id===id2&&x.amount===-100&&x.method==='Düzeltme'));
+const bad=structuredClone(bk);bad.payments=[{...bad.payments.find(x=>x.method==='Düzeltme'),id:'bad-neg',method:'Nakit',amount:-5}];assert.equal((await E(await freshDB())('admin/restore',bad)).status,400);
+const bad0=structuredClone(bk);bad0.payments=[{...bad0.payments.find(x=>x.method==='Düzeltme'),id:'bad-zero',amount:0}];assert.equal((await E(await freshDB())('admin/restore',bad0)).status,400)}}
 await stopPg();console.log((PG?'[postgres] ':'[sqlite] ')+'PASS: my-orders (no leaks), reminder template, PWA manifest/sw/icons, stock (recipes, idempotent deduct, cancel restore, hide-out-of-stock, backup), FX fallback; balances survive product delete/price change/menu resave/rename, backup+restore idempotent, redeploy, migration safety;  menu add/edit/delete, validation, lactose-free milk snapshot, legacy settings, person prefs + auto backups, device-bound links, simultaneous first claim, forwarded link anonymity, reserved names, protected orders, new guest identity, admin reset/revocation, contact updates, ordering and staff regression');
