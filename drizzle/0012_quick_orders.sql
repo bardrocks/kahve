@@ -1,0 +1,9 @@
+CREATE TABLE IF NOT EXISTS quick_orders (
+  id TEXT PRIMARY KEY,
+  label TEXT NOT NULL,
+  buyer TEXT NOT NULL,
+  items TEXT NOT NULL,
+  sort INTEGER NOT NULL DEFAULT 0,
+  created TEXT NOT NULL,
+  updated TEXT NOT NULL
+);
