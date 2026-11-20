@@ -340,6 +340,46 @@ for(const o of (await YA('admin/data')).data.orders.filter(o=>/Öde$/.test(o.buy
 }
 mv=(await stk()).moves.filter(m=>m.ref===so);assert.equal(mv.filter(m=>m.reason==='cancel').length,2);
 await YA('admin/status',{id:so,status:'confirmed'});assert.equal(await qtyOf(cof),1000-36);await YA('admin/status',{id:so,status:'cancelled'});assert.equal(await qtyOf(cof),1000);
+// -- order-update: borç düzenleme (fiyat/qty/ödeyen), elle fiyat, kaldırılmış ürün, stok farkı, ödemeler, yedek
+{const bal=async w=>{const b=(await YA('admin/data')).data.balances.find(x=>x.person===w.toLocaleLowerCase('tr-TR'));return b?b.remaining:0},getO=async id=>(await YA('admin/data')).data.orders.find(o=>o.id===id),cp=async()=>(await YA('admin/data')).data.payments;
+const L=(await YA('admin/data')).data.settings.products.find(x=>x.id==='latte').price,E=(await YA('admin/data')).data.settings.products.find(x=>x.id==='espresso').price;assert.notEqual(L,100);
+const row=(o={})=>({id:'latte',recipient:'Düz Ali',payer:'Düz Ali',qty:2,sugar:0,...o});const c0=await qtyOf(cof);
+let r=await YA('admin/order',{buyer:'Düz Ali',items:[row()]});assert.equal(r.status,200);const oid=r.data.id;assert.equal(await bal('Düz Ali'),2*L);assert.equal(await qtyOf(cof),c0-36);
+assert.equal((await Y('admin/order-update',{id:oid,items:[row()]})).status,401);assert.equal((await YA('admin/order-update',{id:'yok',items:[row()]})).status,404);
+for(const bad of [{price:0},{price:10001},{price:12.5},{price:'x'},{qty:0},{qty:21},{id:'olmayan'}])assert.equal((await YA('admin/order-update',{id:oid,items:[row(bad)]})).status,400,JSON.stringify(bad));
+assert.equal((await YA('admin/order-update',{id:oid,items:[]})).status,400);assert.equal((await YA('admin/order-update',{id:oid,status:'x',items:[row()]})).status,400);assert.equal((await getO(oid)).total,2*L,'geçersiz istek kaydı değiştirmez');
+// fiyat düzeltme
+r=await YA('admin/order-update',{id:oid,items:[row({price:100})]});assert.equal(r.status,200,JSON.stringify(r.data));assert.equal(r.data.total,200);let o=await getO(oid);assert.equal(o.total,200);assert.ok(o.edited&&!isNaN(new Date(o.edited)));assert.equal(o.items[0].price,100);assert.equal(o.items[0].manualPrice,true);assert.equal(o.items[0].listPrice,L);assert.equal(await bal('Düz Ali'),200);assert.equal(await qtyOf(cof),c0-36);
+// fiyatsız satır: normal fiyatlama; sonra aynı snapshot fiyatı tekrar gönderilince elle işareti korunur
+r=await YA('admin/order-update',{id:oid,items:[row()]});assert.equal(r.status,200);o=await getO(oid);assert.equal(o.items[0].price,L);assert.equal(o.items[0].manualPrice,undefined);assert.equal(await bal('Düz Ali'),2*L);
+await YA('admin/order-update',{id:oid,items:[row({price:100})]});r=await YA('admin/order-update',{id:oid,note:'x',items:[row({price:100})]});o=await getO(oid);assert.equal(o.items[0].manualPrice,true);assert.equal(o.note,'x');
+// qty 2→1: 1 fincanlık stok geri gelir; tekrar çağrı idempotent; 1→3 düşer
+r=await YA('admin/order-update',{id:oid,items:[row({qty:1,price:100})]});assert.equal(r.status,200);assert.equal(await qtyOf(cof),c0-18);assert.equal(await bal('Düz Ali'),100);await YA('admin/order-update',{id:oid,items:[row({qty:1,price:100})]});assert.equal(await qtyOf(cof),c0-18);
+await YA('admin/order-update',{id:oid,items:[row({qty:3,price:100})]});assert.equal(await qtyOf(cof),c0-54);assert.equal(await bal('Düz Ali'),300);
+// kahve ve ödeyen değişimi: borç taşınır
+r=await YA('admin/order-update',{id:oid,items:[row({qty:1,price:100}),{id:'espresso',recipient:'Düz Can',payer:'Düz Can',qty:1,sugar:0}]});assert.equal(r.status,200);assert.equal(await bal('Düz Ali'),100);assert.equal(await bal('Düz Can'),E);assert.equal(await qtyOf(cof),c0-36);
+r=await YA('admin/order-update',{id:oid,items:[row({qty:1,price:100,payer:'Düz Can'}),{id:'espresso',recipient:'Düz Can',payer:'Düz Can',qty:1,sugar:0}]});assert.equal(await bal('Düz Ali'),0);assert.equal(await bal('Düz Can'),100+E);
+// alan düzenleme + durum: iptalde stok geri gelir, borç düşer
+r=await YA('admin/order-update',{id:oid,buyer:'Düz Ali',contact:'0555 111 22 33',source:'telefon',status:'cancelled',items:[row({qty:1,price:100})]});assert.equal(r.status,200);o=await getO(oid);assert.equal(o.status,'cancelled');assert.equal(o.source,'telefon');assert.equal(await qtyOf(cof),c0);assert.equal(await bal('Düz Can'),0);
+assert.equal((await YA('admin/order-update',{id:oid,contact:'abc',items:[row()]})).status,400);assert.equal((await YA('admin/order-update',{id:oid,source:'x',items:[row()]})).status,400);assert.equal((await YA('admin/order-update',{id:oid,created:new Date(Date.now()+864e5).toISOString(),items:[row()]})).status,400);
+r=await YA('admin/order-update',{id:oid,status:'confirmed',created:'2026-01-05T10:00:00.000Z',items:[row({qty:2,price:100})]});assert.equal(r.status,200);assert.equal(await qtyOf(cof),c0-36);assert.equal((await getO(oid)).created,'2026-01-05T10:00:00.000Z');
+// menüden kaldırılmış ürün
+r=await YA('admin/order',{buyer:'Düz Eski',items:[row({recipient:'Düz Eski',payer:'Düz Eski',qty:1})]});const gOid=r.data.id;
+await D.prepare('UPDATE orders SET items=?,total=? WHERE id=?').bind(JSON.stringify([{id:'eski-urun',name:'Eski Kahve',price:90,qty:1,recipient:'düz eski',payer:'düz eski',sugar:0,milk:'normal'}]),90,gOid).run();assert.equal(await bal('Düz Eski'),90);
+const gr=(o={})=>({id:'eski-urun',recipient:'Düz Eski',payer:'Düz Eski',qty:1,sugar:0,price:90,...o});assert.equal((await YA('admin/order-update',{id:gOid,items:[gr({price:undefined})]})).status,400);assert.equal((await YA('admin/order-update',{id:gOid,items:[gr({id:'baska-yok'})]})).status,400);
+r=await YA('admin/order-update',{id:gOid,note:'n',items:[gr()]});assert.equal(r.status,200,JSON.stringify(r.data));o=await getO(gOid);assert.equal(o.items[0].name,'Eski Kahve');assert.equal(o.items[0].manualPrice,undefined);assert.equal(await bal('Düz Eski'),90);
+r=await YA('admin/order-update',{id:gOid,items:[gr({price:80,qty:2})]});assert.equal(r.status,200);o=await getO(gOid);assert.equal(o.items.length,1);assert.equal(o.items[0].price,80);assert.equal(o.items[0].manualPrice,true);assert.equal(o.items[0].listPrice,90);assert.equal(await bal('Düz Eski'),160);
+// ödenmiş sipariş: order_ref ödemeleri yeni paylara göre yeniden yazılır, net borç 0
+r=await YA('admin/order',{buyer:'Düz Pay',paid:true,paidMethod:'IBAN',items:[row({recipient:'Düz Pay',payer:'Düz Pay'})]});assert.equal(r.status,200);const pid=r.data.id,pc=(await getO(pid)).created;assert.equal(await bal('Düz Pay'),0);
+r=await YA('admin/order-update',{id:pid,items:[row({recipient:'Düz Pay',payer:'Düz Pay',qty:1,price:100}),row({recipient:'Düz Eş',payer:'Düz Eş',qty:1,price:110})]});assert.equal(r.status,200,JSON.stringify(r.data));assert.equal(r.data.payments.removed,1);assert.deepEqual(r.data.payments.added.map(x=>[x.person,x.amount]).sort(),[['düz eş',110],['düz pay',100]]);
+let pp=(await cp()).filter(x=>x.order_ref===pid);assert.equal(pp.length,2);assert.ok(pp.every(x=>x.method==='IBAN'&&x.created===pc));assert.equal(await bal('Düz Pay'),0);assert.equal(await bal('Düz Eş'),0);assert.equal((await getO(pid)).total,210);
+r=await YA('admin/order-update',{id:pid,status:'cancelled',items:[row({recipient:'Düz Pay',payer:'Düz Pay',qty:1,price:100})]});assert.equal(r.data.payments.removed,2);assert.equal(r.data.payments.added.length,0);assert.ok(!(await cp()).some(x=>x.order_ref===pid));assert.equal(await bal('Düz Pay'),0);
+// yedek/restore edited taşır; eski yedek (edited yok) yüklenir
+const bk2=(await YA('admin/backup')).data;assert.ok(bk2.orders.find(x=>x.id===oid).edited);
+const rs2=async(d,b)=>{const rr=await worker.fetch(new Request('https://mola.test/api/admin/restore',{method:'POST',headers:{Origin:'https://mola.test','X-Mola-Device':'d'.repeat(64),Authorization:'Bearer test-key','Content-Type':'application/json'},body:JSON.stringify(b)}),{DB:d,ADMIN_KEY:'test-key'});return rr.status};
+{const F=await freshDB();assert.equal(await rs2(F,bk2),200);assert.equal((await F.prepare('SELECT edited FROM orders WHERE id=?').bind(oid).first()).edited,bk2.orders.find(x=>x.id===oid).edited)}
+{const old=structuredClone(bk2);for(const x of old.orders)delete x.edited;const F=await freshDB();assert.equal(await rs2(F,old),200);assert.equal((await F.prepare('SELECT edited FROM orders WHERE id=?').bind(oid).first()).edited,null)}
+await D.prepare('UPDATE orders SET status=? WHERE id=?').bind('cancelled',gOid).run();await YA('admin/status',{id:oid,status:'cancelled'});assert.equal(await qtyOf(cof),c0);}
 // onaylanmamış siparişin iptali stok eklemez
 const so2=crypto.randomUUID();await Y('orders',{id:so2,buyer:'Stok Kişi',contact:'05551112233',items:[{id:'espresso',recipient:'Stok Kişi',payer:'Stok Kişi',sugar:0,qty:1}]});await YA('admin/status',{id:so2,status:'cancelled'});assert.equal(await qtyOf(cof),1000);
 // laktozsuz: alternatif kalemden

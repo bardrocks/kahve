@@ -1,26 +1,61 @@
-# Coffyman
+# Coffyman · Fabe Kahvesi
 
-Kahve siparişi, WhatsApp sipariş özeti, kişi hesapları, tahsilatlar, personel rehberi ve tarayıcıya bağlı kişisel bağlantılar.
+Ofis için kahve sipariş, borç/tahsilat, harcama ve stok takip uygulaması.
 
-## Yayın (Cloudflare Workers + D1)
+Canlı site: https://coffyman.bardrock.workers.dev
+(Eski https://coffyman.netlify.app adresi buraya yönlendirilir.)
 
-Canlı site: https://coffyman.bardrock.workers.dev (eski https://coffyman.netlify.app adresi buraya yönlendirilir).
+## Özellikler
 
-- Worker girişi: `cloudflare/worker.mjs` (aynı `worker/index.js` kodunu D1 veritabanı ve KV yedek deposuyla çalıştırır). Ayarlar: `wrangler.toml`.
-- Veritabanı: Cloudflare D1 (`coffyman`). Şema `drizzle/` altındaki migration'lardır. D1 ayrıca son 30 günün herhangi bir anına geri dönmeyi (Time Travel) destekler.
-- Otomatik yayın: Cloudflare Workers Builds `bardrocks/kahve` deposunun `main` dalına bağlıdır; `main`'e her birleştirmede site kendiliğinden derlenip yayınlanır. Önerilen deploy komutu: `npm run deploy` (önce D1 migration'larını uygular, sonra yayınlar).
-- Elle yayınlamak için (Cloudflare API anahtarı ortamda tanımlıyken):
+### Müşteri ekranı
+- Fiyat listesi tarzında, kategorili menü (Sütlü / Sade kahveler), yuvarlak logo.
+- Kahve başına ayrı "kim içecek / kim ödeyecek / şeker / süt" seçimi; laktozsuz süt seçeneği.
+- Kullanıcı hafızası: "Her zamanki" kartı (en çok içilen kahve, şeker adedi, süt tercihi).
+- "Siparişlerim" kartı ve "Kahven hazır" bildirimi.
+- Kişiye özel fiyatı olan kişi menüde "Sana özel" fiyatı görür.
+- Ana ekrana eklenebilir uygulama (PWA).
+- Sipariş WhatsApp mesajı olarak da gönderilir.
+
+### Yönetim paneli
+- **Siparişler:** mobilde kart görünümü, 10'lu sayfalama, arama ve tarih filtresi.
+  - **"+ Sipariş ekle":** WhatsApp, telefon veya yüz yüze gelen siparişler için. Kaydedilen sipariş ödeyenin borcuna yazılır; **"Kaydet ve ödendi"** ile ödeme de aynı anda kaydedilir.
+  - Ödendi/Ödenmedi rozeti, sonradan "Ödendi" işaretleme, "WhatsApp'tan haber ver".
+- **Kahve kartları:** kişinin kahvesi, şekeri, laktozsuz tercihi, notu ve özel fiyatları.
+- **Kişi hesapları:**
+  - Kalan borç, hesap hareketleri ve yürüyen bakiye.
+  - **Ödeme al:** kısmi ödeme; borçtan az alınırsa "kalan kısmı indirim yap, hesabı kapat" seçeneği. Düzenleme ekranında da var.
+  - Hesap özetini kopyalama / WhatsApp'ta gönderme, haftalık borç hatırlatması (cuma şeridi).
+- **Tahsilatlar:** dönem filtresi; indirimler tahsilat toplamına girmez, ayrı gösterilir.
+- **Satış raporu:** kahve bazında adet/ciro, grafik, en çok içenler, saat dağılımı, fincan başı maliyet ve tahmini brüt kâr.
+- **Harcamalar:**
+  - Nakit / Kredi kartı / Banka kartı / IBAN; kategori ve satıcı dağılımı.
+  - **Kasa / Net** (tahsilat − harcama, nakit kasa).
+  - Harcama stoğa bağlanabilir.
+- **Stok:**
+  - Reçeteye göre onaylı siparişte otomatik düşüm, iptalde geri ekleme, kritik seviye uyarısı.
+  - Günlük tüketim, tahmini bitiş, her alımın kaç günde bittiği, birim maliyet.
+- **Ayarlar:** menü (kahve ekle/düzenle/sil, reçete, laktozsuz ekstra ücret), özel fiyatlar, yedekler.
+- **Diğer:**
+  - Tüm tutarların yanında güncel kurla dolar karşılığı (TCMB, yedek kaynak open.er-api.com).
+  - Raporlarda Excel uyumlu CSV dışa aktarma.
+
+## Barındırma (Cloudflare Workers + D1)
+
+- **Worker girişi:** `cloudflare/worker.mjs`. Aynı `worker/index.js` kodunu D1 veritabanı ve KV yedek deposuyla çalıştırır. Ayarlar `wrangler.toml` dosyasında.
+- **Veritabanı:** Cloudflare D1 (`coffyman`). Şema `drizzle/` altındaki migration'lardır. D1, son 30 günün herhangi bir anına geri dönmeyi (Time Travel) destekler.
+- **Otomatik yayın:** Cloudflare Workers Builds `bardrocks/kahve` deposunun `main` dalına bağlıdır. Deploy komutu `npm run deploy`: önce D1 migration'larını uygular, sonra yayınlar. `main`'e her birleştirmede site kendiliğinden güncellenir.
+- **Elle yayın** (Cloudflare API anahtarı tanımlıyken):
   ```
   npx wrangler d1 migrations apply coffyman --remote
   npx wrangler deploy
   ```
-- Yönetim şifresi: Worker secret `ADMIN_KEY` (`npx wrangler secret put ADMIN_KEY` veya Cloudflare paneli > Workers > coffyman > Settings > Variables).
-- Otomatik yedek: her gece UTC 00:00 (TR 03:00) cron ile ve yazma işlemlerinden sonra en fazla saatte bir, KV deposuna (`BACKUPS_KV`).
-- Netlify: artık yalnızca yönlendirme yapar (`netlify.toml`, `netlify-redirect/_redirects`). `netlify/` altındaki fonksiyon ve Postgres dosyaları eski kurulumun kaydıdır; Postgres testleri (`npm run check:pg`) uyumluluk için durur.
+- **Yönetim şifreleri:** Worker secret'ları `ADMIN_KEY` (ana) ve `ADMIN_KEY_2` (ek şifre). Değiştirmek için Cloudflare paneli > Workers > coffyman > Settings > Variables and Secrets, ya da `npx wrangler secret put ADMIN_KEY_2`. Şifreler repoda tutulmaz.
+- **Otomatik yedek:** her gece UTC 00:00'da (TR 03:00) cron ile alınır, ayrıca yazma işlemlerinden sonra en fazla saatte bir. Yedekler KV deposuna (`BACKUPS_KV`) yazılır, günlük yedekler 30 gün saklanır. Yönetim paneli > Ayarlar > "Yedek ve veri güvenliği" altında liste, "Şimdi yedek al" ve "Geri yükle (eksikleri ekle)" bulunur.
+- **Netlify:** artık yalnızca yönlendirme yapar (`netlify.toml`, `netlify-redirect/_redirects`). `netlify/` altındaki fonksiyon ve Postgres dosyaları eski kurulumun kaydıdır; Postgres uyumluluk testleri (`npm run check:pg`) için durur.
 
 ## Yerel çalıştırma
 
-Node.js 22 veya üzerini kurun:
+Node.js 22 veya üzeri gerekir:
 
 ```
 npm install
@@ -28,39 +63,34 @@ npm run build
 npm run dev
 ```
 
-Tarayıcıda http://localhost:4173 adresini açın. Yerel deneme bellek içi SQLite kullanır (`drizzle/`), sunucu kapanınca kayıtlar silinir ve canlı veriye bağlanmaz.
+Tarayıcıda http://localhost:4173 adresini açın. Yerel deneme bellek içi SQLite kullanır (`drizzle/`). Sunucu kapanınca kayıtlar silinir; canlı veriye bağlanmaz.
 
-Yerel yönetim şifresi varsayılan olarak: preview-only. Değiştirmek için proje klasöründe `.env` dosyasına `ADMIN_KEY=yeni-sifreniz` yazın (git'e gönderilmez).
+Yerel yönetim şifresi varsayılan olarak `preview-only`. Değiştirmek için proje klasöründe `.env` dosyasına `ADMIN_KEY=yeni-sifreniz` yazın (git'e gönderilmez).
 
-Testler: `npm run build && npm run check` (SQLite) ve `npm run check:pg` (yerel Postgres uyumlu motor, `@netlify/database-dev`).
+Testler:
+- `npm run build && npm run check` (SQLite)
+- `npm run check:pg` (yerel Postgres uyumlu motor)
 
 ## Dosyalar
 
-- index.html: müşteri ekranı ve yönetim paneli
-- worker/index.js: API, sunucu doğrulaması ve sipariş işlemleri
-- assets/: kahve fotoğrafları
-- drizzle/: yerel deneme (SQLite) şeması
-- netlify/database/migrations/: canlı (Postgres) şema migration'ları. Uygulanmış migration düzenlenmez; yalnızca yeni numaralı ekleme yapan dosyalar eklenir
-- netlify/functions/app.mjs: Netlify fonksiyon girişi (yazma işlemlerinden sonra en fazla saatte bir `hourly/latest.json` yedeği alır)
-- netlify/functions/daily-backup.mjs: her gece (UTC 00:00 = TR 03:00) tam yedek alan zamanlanmış fonksiyon
-- server/backups.mjs: otomatik yedek yardımcıları (Netlify Blobs / bellek içi sahte store)
-- server/pg-d1.mjs: D1 benzeri arayüzü Postgres üzerinde sağlayan adaptör
-- scripts/build.mjs: Worker paketini üretir
-- scripts/dev.mjs: Windows/Linux üzerinde yerel deneme sunucusu
-- scripts/check.mjs: işlev kontrolleri (node scripts/check.mjs)
-
-Canlı kayıtlar Cloudflare D1 veritabanında saklanır. Bu ZIP kaynak kod ve görsellerin kopyasıdır; canlı veri yedeği değildir. Kaynakları indirmek canlı yayını değiştirmez.
+- `index.html`: müşteri ekranı ve yönetim paneli
+- `worker/index.js`: API, doğrulama, sipariş, borç, stok, harcama ve yedek işlemleri
+- `cloudflare/worker.mjs`: Cloudflare girişi (D1, KV yedek, cron, ek yönetim şifresi)
+- `wrangler.toml`: Cloudflare ayarları
+- `drizzle/`: veritabanı şeması (canlı D1 ve yerel SQLite)
+- `assets/`: kahve fotoğrafları ve uygulama ikonları
+- `logos/`, `gorseller/`: logo çalışmaları, fiyat listesi görseli, ekran görüntüleri
+- `server/backups.mjs`: otomatik yedek yardımcıları
+- `server/pg-d1.mjs`: Postgres testleri için D1 benzeri adaptör
+- `scripts/build.mjs`: Worker paketini üretir (HTML ve görselleri gömer)
+- `scripts/dev.mjs`: yerel deneme sunucusu
+- `scripts/check.mjs`: uçtan uca testler
+- `netlify/`, `netlify.toml`, `netlify-redirect/`: eski Netlify kurulumu ve yönlendirme
 
 ## Güncelleme yaparken verileri koruma
 
-- Siparişler, borçlar, tahsilatlar, personel ve ayarlar kod paketinde değil, canlı veritabanında (Cloudflare D1) durur. Kodu yeniden yayınlamak bu verileri silmez veya sıfırlamaz.
-- Her yayından önce Yönetim paneli > Ayarlar > "Yedek indir" ile tam yedek alın (coffyman-yedek-YYYY-MM-DD.json). "Yedek yükle" yalnızca eksik kayıtları ekler; mevcut kayıtları silmez veya ezmez.
-- Şema değişiklikleri (hem netlify/database/migrations/ hem de yerel test için drizzle/ altına, aynı içerikle) yalnızca yeni numaralı, ekleme yapan (additive) migration olmalıdır (örn. netlify/database/migrations/<rakamlar>_ad.sql: CREATE TABLE IF NOT EXISTS, ALTER TABLE ... ADD COLUMN). Mevcut migration dosyalarını değiştirmeyin; DROP, DELETE, TRUNCATE veya tabloyu yeniden oluşturma kullanmayın. scripts/check.mjs bunları otomatik reddeder.
-- Müşteri borcu siparişlerin (ürün adı ve fiyat anlık kopya olarak saklanır) ve tahsilatların toplamından hesaplanır; /api/admin/data yanıtındaki `balances` aynı hesabı sunucuda yapar. Menüden ürün silmek veya fiyat değiştirmek eski borçları etkilemez.
-- Bir kişiyi yeniden adlandırırsanız sipariş ve tahsilat kayıtları da yeni isme taşınır (tek işlemde); borç aynı kalır.
-
-## Otomatik yedek ve kahve kartları
-
-- Her gece UTC 00:00'da (Türkiye saatiyle 03:00) `netlify/functions/daily-backup.mjs` tam bir JSON dökümü alır ve Netlify Blobs'taki `backups` deposuna `daily/YYYY-MM-DD.json` (ve `latest.json`) olarak yazar; 30 günden eski günlük yedekler silinir. Ayrıca sipariş, ödeme, ayar, personel ve kahve kartı gibi yazma işlemlerinden sonra en fazla saatte bir `hourly/latest.json` yedeği arka planda alınır.
-- Yönetim paneli > Ayarlar > "Yedek ve veri güvenliği" altında "Otomatik yedekler" listelenir; "Geri yükle (eksikleri ekle)" yalnızca eksik kayıtları ekler, mevcut hiçbir kaydı silmez veya ezmez. Elle "Yedek indir / yükle" de durur. Yerelde (`npm run dev`) yedekler bellek içindedir.
-- Yönetim paneli > "Kahve kartları": kişinin kahvesi, şeker ve laktozsuz tercihi ile notu. Elle girilen bilgi, sipariş geçmişinden hesaplanan bilgiden önceliklidir; müşteri ekranındaki "Her zamanki" ve sipariş ön doldurma da bunu kullanır. Veriler `person_prefs` tablosunda durur ve yedeğe dahildir.
+- Siparişler, borçlar, tahsilatlar, harcamalar, stok ve ayarlar kodda değil, canlı veritabanında (Cloudflare D1) durur. Kodu yeniden yayınlamak bu verileri silmez.
+- **Şema değişiklikleri:** yalnızca yeni numaralı ve ekleme yapan (additive) migration olarak yapılır (`drizzle/00XX_ad.sql`: `CREATE TABLE IF NOT EXISTS`, `ALTER TABLE ... ADD COLUMN`). Postgres testleri için aynısı `netlify/database/migrations/` altına da eklenir. Mevcut migration dosyaları değiştirilmez; `DROP`, `DELETE`, `TRUNCATE` ve `RENAME` kullanılmaz. `scripts/check.mjs` bunları otomatik reddeder.
+- **Fiyatlar:** siparişte ürün adı ve fiyat (özel fiyat dahil) anlık kopya olarak saklanır. Menü fiyatını veya özel fiyatı değiştirmek, ürünü silmek eski borçları etkilemez.
+- **Yeniden adlandırma:** bir kişiyi yeniden adlandırmak sipariş, tahsilat, kahve kartı ve özel fiyat kayıtlarını da yeni isme taşır; borç aynı kalır.
+- **Yedek yükleme:** "Yedek yükle" ve "Geri yükle" yalnızca eksik kayıtları ekler; mevcut kayıtları silmez veya değiştirmez.
