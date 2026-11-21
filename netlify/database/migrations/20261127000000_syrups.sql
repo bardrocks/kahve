@@ -1,0 +1,1 @@
+ALTER TABLE person_prefs ADD COLUMN IF NOT EXISTS syrup TEXT;

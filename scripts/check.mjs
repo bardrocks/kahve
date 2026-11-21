@@ -632,4 +632,69 @@ assert.equal((await Q('admin/payment-delete',{id:id3})).status,200);assert.equal
 {const bk=(await Q('admin/backup')).data;assert.ok(bk.payments.some(x=>x.method==='Düzeltme'&&x.amount<0));const F=await freshDB(),Z=E(F);const rs=await Z('admin/restore',bk);assert.equal(rs.status,200,JSON.stringify(rs.data));assert.ok((await Z('admin/data')).data.payments.some(x=>x.id===id2&&x.amount===-100&&x.method==='Düzeltme'));
 const bad=structuredClone(bk);bad.payments=[{...bad.payments.find(x=>x.method==='Düzeltme'),id:'bad-neg',method:'Nakit',amount:-5}];assert.equal((await E(await freshDB())('admin/restore',bad)).status,400);
 const bad0=structuredClone(bk);bad0.payments=[{...bad0.payments.find(x=>x.method==='Düzeltme'),id:'bad-zero',amount:0}];assert.equal((await E(await freshDB())('admin/restore',bad0)).status,400)}}
+// --- şurup, sipariş silme/geri alma ---
+{const mkS=F=>async(p,b,auth=true)=>{const r=await worker.fetch(new Request('https://mola.test/api/'+p,{method:b?'POST':'GET',headers:{Origin:'https://mola.test','X-Mola-Device':'d'.repeat(64),...(auth?{Authorization:'Bearer test-key'}:{}),...(b?{'Content-Type':'application/json'}:{})},...(b?{body:JSON.stringify(b)}:{})}),{DB:F,ADMIN_KEY:'test-key'});return {status:r.status,data:await r.json().catch(()=>null)}};
+const S=mkS(await freshDB());
+const dat=async()=>(await S('admin/data')).data,items=async()=>(await dat()).stock.items,qty=async id=>(await items()).find(x=>x.id===id).qty;
+let d=await dat();assert.deepEqual(d.settings.syrups,[]);
+const sk=(await S('admin/stock-item',{name:'Karamel şurubu T',unit:'ml',qty:100,minQty:10})).data.id,sk2=(await S('admin/stock-item',{name:'Süt T',unit:'ml',qty:1000,minQty:10})).data.id;
+const cfg=(syrups,extra={})=>S('admin/settings',{name:'Coffyman',phone:'905548955011',products:d.settings.products,syrups,...extra});
+for(const bad of [[{name:''}],[{name:'X',amount:-1}],[{name:'X',extra:1.5}],[{name:'X',extra:1001}],[{name:'X',stockItemId:'yok'}],'x',[{name:'A'.repeat(41)}]])assert.equal((await cfg(bad)).status,400);
+assert.equal((await S('admin/settings',{name:'Coffyman',phone:'905548955011',products:d.settings.products,syrups:[]},false)).status,401);
+let rs=await cfg([{name:'Karamel',stockItemId:sk,amount:10,extra:0},{name:'Vanilya',extra:15}]);assert.equal(rs.status,200);const [KA,VA]=rs.data.syrups.map(x=>x.id);assert.equal(KA,'karamel');d=await dat();assert.deepEqual(d.settings.syrups.map(x=>[x.name,x.amount,x.extra,x.stockItemId||null]),[['Karamel',10,0,sk],['Vanilya',10,15,null]]);assert.deepEqual((await S('menu',null,false)).data.syrups.map(x=>x.id),[KA,VA]);
+// ayar kaydı mevcut şurupları korur (syrups gönderilmezse)
+assert.equal((await S('admin/settings',{name:'Coffyman',phone:'905548955011',products:d.settings.products})).status,200);assert.equal((await dat()).settings.syrups.length,2);
+// düzenleme id korur, yeni ad yeni id
+rs=await cfg([{id:KA,name:'Karamel Özel',stockItemId:sk,amount:12,extra:0},{id:VA,name:'Vanilya',extra:15},{name:'Vanilya',extra:1}]);assert.equal(rs.data.syrups[0].id,KA);assert.equal(rs.data.syrups[1].id,'vanilya');assert.equal(rs.data.syrups[2].id,'vanilya-2');
+await cfg([{id:KA,name:'Karamel',stockItemId:sk,amount:10,extra:0},{id:'vanilya',name:'Vanilya',extra:15}]);
+// reçete: latte süt kalemi + şurup
+const lat=d.settings.products.find(p=>p.id==='latte');await S('admin/settings',{name:'Coffyman',phone:'905548955011',products:d.settings.products.map(p=>p.id==='latte'?{...p,recipe:[{itemId:sk2,amount:100}]}:p)});
+const ord=(o={},extra={})=>({buyer:'Şurup Kişi',items:[{id:'latte',recipient:'Şurup Kişi',payer:'Şurup Kişi',qty:2,sugar:1,...o}],...extra});
+assert.equal((await S('admin/order',ord({syrup:'yok'}))).status,400);assert.equal((await S('admin/order',ord({syrup:7}))).status,400);assert.equal((await S('orders',{id:crypto.randomUUID(),buyer:'Web',contact:'05551112233',items:[{id:'latte',recipient:'W',payer:'W',qty:1,sugar:0,syrup:'yok'}]},false)).status,400);
+const lp=d.settings.products.find(p=>p.id==='latte').price;
+let r1=await S('admin/order',ord({syrup:KA}));assert.equal(r1.status,200);assert.equal(r1.data.total,lp*2);let o1=(await dat()).orders.find(o=>o.id===r1.data.id);assert.equal(o1.items[0].syrup,KA);assert.equal(o1.items[0].syrupName,'Karamel');assert.equal(o1.items[0].price,lp);assert.equal(await qty(sk),80);assert.equal(await qty(sk2),800);
+let r2=await S('admin/order',ord({syrup:VA,milk:'normal'}));assert.equal(r2.data.total,(lp+15)*2);const o2=(await dat()).orders.find(o=>o.id===r2.data.id);assert.equal(o2.items[0].price,lp+15);assert.equal(await qty(sk),80,'stoksuz şurup kalem düşmez');
+// düzenleme: adet 2 -> 3 fark; syrup kaldır -> geri ekle
+const upd=(id,row)=>S('admin/order-update',{id,items:[{id:'latte',recipient:'Şurup Kişi',payer:'Şurup Kişi',sugar:1,...row}]});
+assert.equal((await upd(r1.data.id,{qty:3,syrup:KA,price:lp})).status,200);assert.equal(await qty(sk),70);
+assert.equal((await upd(r1.data.id,{qty:3,price:lp})).status,200);assert.equal(await qty(sk),100);
+assert.equal((await upd(r1.data.id,{qty:2,syrup:KA,price:lp})).status,200);assert.equal(await qty(sk),80);o1=(await dat()).orders.find(o=>o.id===r1.data.id);assert.equal(o1.items[0].syrupName,'Karamel');
+assert.equal((await upd(r2.data.id,{qty:2,syrup:VA,price:lp+15})).status,200);assert.equal((await dat()).orders.find(o=>o.id===r2.data.id).items[0].manualPrice,undefined);
+// iptal geri ekler, tekrar onay tekrar düşer
+await S('admin/status',{id:r1.data.id,status:'cancelled'});assert.equal(await qty(sk),100);assert.equal(await qty(sk2),800);await S('admin/status',{id:r1.data.id,status:'delivered'});assert.equal(await qty(sk),80);
+// quick order ile şurup
+const qo=await S('admin/quick-order',{buyer:'Şurup Kişi',items:[{id:'latte',recipient:'Şurup Kişi',payer:'Şurup Kişi',qty:1,sugars:[0],syrup:KA}]});assert.equal(qo.status,200);assert.equal((await dat()).quickOrders.find(q=>q.id===qo.data.id).items[0].syrup,KA);assert.equal((await S('admin/quick-order',{buyer:'X',items:[{id:'latte',recipient:'X',payer:'X',qty:1,sugars:[0],syrup:'yok'}]})).status,400);
+let qr=await S('admin/quick-order-run',{id:qo.data.id});assert.equal(qr.status,200);assert.equal(await qty(sk),70);assert.equal((await dat()).orders.find(o=>o.id===qr.data.id).items[0].syrupName,'Karamel');
+// prefs.syrup
+assert.equal((await S('admin/prefs',{name:'Şurup Kişi',coffee:'Latte',syrup:'yok'})).status,400);assert.equal((await S('admin/prefs',{name:'Şurup Kişi',coffee:'Latte',sugar:1,syrup:VA})).status,200);let pf=(await dat()).prefs.find(x=>x.name_key==='şurup kişi');assert.equal(pf.syrup,VA);
+let mem=(await S('memory',{name:'Şurup Kişi'},false)).data;assert.equal(mem.favorites[0].syrup,VA);assert.equal(mem.manual.syrup,VA);
+assert.equal((await S('admin/prefs',{name:'Şurup Kişi',coffee:'Latte'})).status,200);assert.equal((await dat()).prefs.find(x=>x.name_key==='şurup kişi').syrup,null);mem=(await S('memory',{name:'Şurup Kişi'},false)).data;assert.equal(mem.favorites[0].syrup,KA,'siparişlerden çıkarılan son şurup');
+// rename taşır
+await S('admin/prefs',{name:'Taşınan Ki',coffee:'Latte',syrup:KA});const stf=(await S('admin/staff',{name:'Taşınan Ki',phone:'05551230099'})).data.id;assert.equal((await S('admin/staff',{id:stf,name:'Taşınan Kişi',phone:'05551230099'})).status,200);assert.equal((await dat()).prefs.find(x=>x.name_key==='taşınan kişi').syrup,KA);
+// stok kalemi silinince şurup bağı kopar
+{const tmp=(await S('admin/stock-item',{name:'Geçici şurup',unit:'ml',qty:5,minQty:0})).data.id;await cfg([{id:KA,name:'Karamel',stockItemId:sk,amount:10,extra:0},{id:'vanilya',name:'Vanilya',extra:15},{name:'Çikolata',stockItemId:tmp}]);assert.equal((await S('admin/stock-item-delete',{id:tmp})).status,200);const sy=(await dat()).settings.syrups;assert.equal(sy.length,3);assert.equal(sy[2].stockItemId,undefined);await cfg([{id:KA,name:'Karamel',stockItemId:sk,amount:10,extra:0},{id:'vanilya',name:'Vanilya',extra:15}])}
+// yedek/restore: yeni alanlar taşınır, eski yedek (syrup yok) yüklenir
+{const bk=(await S('admin/backup')).data;assert.ok(bk.person_prefs.some(x=>x.syrup===VA||x.syrup===KA));assert.ok(bk.orders.some(o=>o.items.some(i=>i.syrup===KA)));assert.equal(bk.settings.syrups.length,2);
+const G=await freshDB(),Z=async(p,b)=>{const r=await worker.fetch(new Request('https://mola.test/api/'+p,{method:b?'POST':'GET',headers:{Origin:'https://mola.test','X-Mola-Device':'e'.repeat(64),Authorization:'Bearer test-key',...(b?{'Content-Type':'application/json'}:{})},...(b?{body:JSON.stringify(b)}:{})}),{DB:G,ADMIN_KEY:'test-key'});return {status:r.status,data:await r.json().catch(()=>null)}};
+const rr=await Z('admin/restore',bk);assert.equal(rr.status,200,JSON.stringify(rr.data));const zd=(await Z('admin/data')).data;assert.equal(zd.prefs.find(x=>x.name_key==='taşınan kişi').syrup,KA);assert.equal(zd.settings.syrups.length,2);assert.ok(zd.orders.some(o=>o.items.some(i=>i.syrupName==='Karamel')));
+const old=structuredClone(bk);old.person_prefs=old.person_prefs.map(({syrup,...x})=>({...x,name_key:'eski '+x.name_key}));old.orders=[];old.payments=[];old.settings=null;const H=await freshDB();const rz=await worker.fetch(new Request('https://mola.test/api/admin/restore',{method:'POST',headers:{Origin:'https://mola.test',Authorization:'Bearer test-key','Content-Type':'application/json'},body:JSON.stringify(old)}),{DB:H,ADMIN_KEY:'test-key'});assert.equal(rz.status,200);
+const badp=structuredClone(bk);badp.person_prefs[0].syrup=5;assert.equal((await mkS(await freshDB())('admin/restore',badp)).status,400)}
+// --- sipariş silme ---
+assert.equal((await S('admin/order-delete',{id:r1.data.id},false)).status,401);assert.equal((await S('admin/order-delete',{id:'yok'})).status,404);assert.equal((await S('admin/order-delete',{})).status,404);
+const paidOrd=await S('admin/order',ord({syrup:KA},{paid:true,paidMethod:'Nakit'}));assert.equal(paidOrd.status,200);const bOf=async n=>(await dat()).balances.find(b=>b.person===n);const skBefore=await qty(sk),skmBefore=await qty(sk2);
+assert.equal(await qty(sk),skBefore);const debtBefore=(await bOf('şurup kişi')),pc=(await dat()).payments.filter(p=>p.order_ref===paidOrd.data.id).length;assert.equal(pc,1);
+// onaylı + ödemeli sil
+let del=await S('admin/order-delete',{id:paidOrd.data.id});assert.equal(del.status,200);assert.equal(del.data.removedPayments,1);assert.ok(del.data.stockRestored.some(x=>x.itemId===sk&&x.qty===20));assert.equal(del.data.order.id,paidOrd.data.id);assert.ok(Array.isArray(del.data.order.items));assert.equal(del.data.payments.length,1);
+assert.equal(await qty(sk),skBefore+20);assert.equal(await qty(sk2),skmBefore+200);d=await dat();assert.ok(!d.orders.some(o=>o.id===paidOrd.data.id));assert.ok(!d.payments.some(p=>p.order_ref===paidOrd.data.id));assert.equal((await S('admin/order-delete',{id:paidOrd.data.id})).status,404);
+// geri al: aynı id, stok tekrar düşer, ödeme geri gelir
+assert.equal((await S('admin/order-restore',{order:del.data.order,payments:del.data.payments},false)).status,401);const rsr=await S('admin/order-restore',{order:del.data.order,payments:del.data.payments});assert.equal(rsr.status,200);assert.equal(rsr.data.id,paidOrd.data.id);d=await dat();const ro=d.orders.find(o=>o.id===paidOrd.data.id);assert.equal(ro.created,del.data.order.created);assert.equal(ro.total,del.data.order.total);assert.equal(ro.items[0].syrup,KA);assert.equal(d.payments.filter(p=>p.order_ref===ro.id).length,1);assert.equal(await qty(sk),skBefore);assert.equal(await qty(sk2),skmBefore);assert.equal((await S('admin/order-restore',{order:del.data.order,payments:del.data.payments})).status,409);assert.equal((await S('admin/order-restore',{order:{id:'x'}})).status,400);
+// borç: silince düşer
+const dueBefore=(await bOf('şurup kişi')).remaining;del=await S('admin/order-delete',{id:r2.data.id});assert.equal(del.status,200);assert.equal((await bOf('şurup kişi')).remaining,dueBefore-(lp+15)*2);
+// iptal edilmiş sipariş: çift geri ekleme yok
+const c1x=await S('admin/order',ord({syrup:KA}));await S('admin/status',{id:c1x.data.id,status:'cancelled'});const sa=await qty(sk),sb=await qty(sk2);del=await S('admin/order-delete',{id:c1x.data.id});assert.equal(del.status,200);assert.deepEqual(del.data.stockRestored,[]);assert.equal(await qty(sk),sa);assert.equal(await qty(sk2),sb);
+// bekleyen sipariş: stok değişmez
+const pnd=await S('admin/order',ord({syrup:KA},{status:'pending'}));const sc=await qty(sk);del=await S('admin/order-delete',{id:pnd.data.id});assert.equal(del.status,200);assert.equal(await qty(sk),sc);assert.equal((await dat()).orders.some(o=>o.id===pnd.data.id),false);
+// silinen siparişin hareketleri de gider; başka siparişlerinki durur
+assert.ok((await dat()).stock.moves.some(m=>m.ref===r1.data.id));assert.ok(!(await dat()).stock.moves.some(m=>m.ref===c1x.data.id));
+}
 await stopPg();console.log((PG?'[postgres] ':'[sqlite] ')+'PASS: my-orders (no leaks), reminder template, PWA manifest/sw/icons, stock (recipes, idempotent deduct, cancel restore, hide-out-of-stock, backup), FX fallback; balances survive product delete/price change/menu resave/rename, backup+restore idempotent, redeploy, migration safety;  menu add/edit/delete, validation, lactose-free milk snapshot, legacy settings, person prefs + auto backups, device-bound links, simultaneous first claim, forwarded link anonymity, reserved names, protected orders, new guest identity, admin reset/revocation, contact updates, ordering and staff regression');
