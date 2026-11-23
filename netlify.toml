@@ -1,6 +1,8 @@
 # Site Cloudflare Workers'a taşındı (https://coffyman.bardrock.workers.dev).
 # Netlify artık yalnızca eski adresi yeni siteye yönlendirir; fonksiyon/veritabanı çalıştırmaz.
 [build]
+  # Netlify'da hiçbir build/deploy preview çalışmasın (kredi harcamasın). Son yayınlanan yönlendirme sürümü canlı kalır.
+  ignore = "exit 0"
   command = "echo 'Netlify: yalnızca yönlendirme'"
   publish = "netlify-redirect"
 
