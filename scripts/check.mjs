@@ -706,4 +706,63 @@ const pnd=await S('admin/order',ord({syrup:KA},{status:'pending'}));const sc=awa
 // silinen siparişin hareketleri de gider; başka siparişlerinki durur
 assert.ok((await dat()).stock.moves.some(m=>m.ref===r1.data.id));assert.ok(!(await dat()).stock.moves.some(m=>m.ref===c1x.data.id));
 }
+// --- paket ölçümü (pack_runs) ---
+{const F0=await freshDB(),mk=(F,extra={})=>async(p,b,auth=true)=>{const r=await worker.fetch(new Request('https://mola.test/api/'+p,{method:b?'POST':'GET',headers:{Origin:'https://mola.test','X-Mola-Device':'d'.repeat(64),...(auth?{Authorization:'Bearer test-key'}:{}),...(b?{'Content-Type':'application/json'}:{})},...(b?{body:JSON.stringify(b)}:{})}),{DB:F,ADMIN_KEY:'test-key',...extra});return {status:r.status,data:await r.json().catch(()=>null)}};
+let hookHits=0;const S=mk(F0,{BACKUP_HOOK:()=>{hookHits++}}),dat=async()=>(await S('admin/data')).data,ago=m=>new Date(Date.now()-m*6e4).toISOString();
+const sk=(await S('admin/stock-item',{name:'Süt PT',unit:'ml',qty:5000,minQty:100})).data.id,lk=(await S('admin/stock-item',{name:'Laktozsuz süt PT',unit:'ml',qty:5000,minQty:100})).data.id,cf=(await S('admin/stock-item',{name:'Kahve PT',unit:'g',qty:500,minQty:10})).data.id;
+let d=await dat();assert.deepEqual(d.packRuns,[]);const pr0=d.settings.products;assert.ok(pr0.find(p=>p.id==='latte').milk&&pr0.find(p=>p.id==='cappuccino').milk&&!pr0.find(p=>p.id==='espresso').milk);
+// latte reçeteli; cappuccino reçetesiz sütlü (yedek kural); espresso sütsüz
+assert.equal((await S('admin/settings',{name:'Coffyman',phone:'905548955011',products:pr0.map(p=>p.id==='latte'?{...p,recipe:[{itemId:sk,amount:150}]}:p)})).status,200);
+const ord=(id,extra={},it={})=>({buyer:'Pk',items:[{id,recipient:'Pk Kişi',payer:'Pk',qty:1,sugar:0,...it}],...extra});
+// yetki ve doğrulama
+for(const [p,b] of [['pack-open',{itemId:sk,size:1000}],['pack-close',{id:'x'}],['pack-update',{id:'x'}],['pack-delete',{id:'x'}],['pack-apply',{itemId:sk,amount:1,productIds:['latte']}]])assert.equal((await S('admin/'+p,b,false)).status,401,p);
+assert.equal((await S('admin/pack-open',{itemId:'yok',size:1000})).status,404);
+for(const bad of [{size:0},{size:-5},{size:'1000'},{size:1000,cost:-1},{size:1000,cost:'a'},{size:1000,opened:'x'},{size:1000,opened:new Date(Date.now()+36e5).toISOString()},{size:1000,unit:''}])assert.equal((await S('admin/pack-open',{itemId:sk,...bad})).status,400,JSON.stringify(bad));
+let r=await S('admin/pack-open',{itemId:sk,size:1000,cost:60,opened:ago(60)});assert.equal(r.status,200);const pid=r.data.id;
+r=await S('admin/pack-open',{itemId:sk,size:500});assert.equal(r.status,409);assert.match(r.data.error,/Önce açık paketi bitir/);
+// aynı anda başka kalemin paketi açılabilir
+assert.equal((await S('admin/pack-open',{itemId:cf,size:250})).status,200);
+// siparişler: 2 latte (teslim), 1 cappuccino (onaylı, reçetesiz), 1 espresso (sütsüz), pending/iptal/aralık dışı sayılmaz
+for(const o of [ord('latte'),ord('latte',{status:'preparing'}),ord('cappuccino',{status:'confirmed'}),ord('espresso'),ord('latte',{status:'pending'}),ord('latte',{status:'cancelled'}),ord('latte',{created:ago(120)})])assert.equal((await S('admin/order',o)).status,200);
+d=await dat();let pk=d.packRuns.find(x=>x.id===pid);assert.equal(pk.counted,3);assert.equal(pk.lines.length,3);assert.ok(pk.lines.every(l=>l.recipient==='Pk Kişi'&&l.created>=pk.opened));assert.equal(pk.closed,null);assert.equal(pk.cups,null);assert.equal(pk.perCup,333.333);assert.equal(pk.costPerCup,20);
+// yazma uçları yedek kancasını tetikler
+assert.ok(hookHits>0);
+// düzeltme
+for(const bad of [{adjust:1.5},{adjust:'1'},{adjust:5000},{closed:'x'}])assert.equal((await S('admin/pack-update',{id:pid,...bad})).status,400,JSON.stringify(bad));
+assert.equal((await S('admin/pack-update',{id:'yok',adjust:1})).status,404);assert.equal((await S('admin/pack-close',{id:'yok'})).status,404);assert.equal((await S('admin/pack-delete',{id:'yok'})).status,404);
+assert.equal((await S('admin/pack-update',{id:pid,adjust:-1,note:'eski sütle 1'})).status,200);pk=(await dat()).packRuns.find(x=>x.id===pid);assert.equal(pk.adjust,-1);assert.equal(pk.perCup,500);assert.equal(pk.costPerCup,30);assert.equal(pk.note,'eski sütle 1');
+// kapat: cups = 3 + (-1) = 2
+assert.equal((await S('admin/pack-close',{id:pid,adjust:-10})).status,400);assert.equal((await S('admin/pack-close',{id:pid,closed:ago(120)})).status,400);
+r=await S('admin/pack-close',{id:pid});assert.equal(r.status,200,JSON.stringify(r.data));assert.deepEqual([r.data.cups,r.data.perCup,r.data.costPerCup,r.data.counted],[2,500,30,3]);
+assert.equal((await S('admin/pack-close',{id:pid})).status,409);
+pk=(await dat()).packRuns.find(x=>x.id===pid);assert.equal(pk.cups,2);assert.ok(pk.closed);assert.equal(pk.counted,undefined);
+// sonradan girilen sipariş (aralık içinde): güncelleyince yeniden sayılır
+assert.equal((await S('admin/order',ord('latte',{created:ago(30)}))).status,200);assert.equal((await S('admin/pack-update',{id:pid,note:'sonradan'})).status,200);pk=(await dat()).packRuns.find(x=>x.id===pid);assert.equal(pk.cups,3);assert.equal(pk.perCup,333.333);assert.equal(pk.costPerCup,20);
+assert.equal((await S('admin/pack-update',{id:pid,closed:ago(200)})).status,400);// bitiş açılıştan önce
+assert.equal((await S('admin/pack-update',{id:pid,closed:null})).status,400);
+assert.equal((await S('admin/pack-update',{id:pid,cost:90,adjust:0})).status,200);pk=(await dat()).packRuns.find(x=>x.id===pid);assert.equal(pk.cups,4);assert.equal(pk.perCup,250);assert.equal(pk.costPerCup,22.5);
+assert.equal((await S('admin/pack-update',{id:pid,adjust:-1,cost:60})).status,200);
+// kapanınca yeni paket açılabilir
+const p2=(await S('admin/pack-open',{itemId:sk,size:1000,opened:ago(5)}));assert.equal(p2.status,200);
+// laktozsuz kalem: yalnız laktozsuz kayıtlar; reçeteli ürün lactoseFreeItemId'ye bakar
+{const lf=(await S('admin/pack-open',{itemId:lk,size:1000,opened:ago(3)})).data.id;assert.equal((await S('admin/pack-apply',{itemId:lk,amount:120,productIds:['latte']})).status,200);let lat=(await dat()).settings.products.find(p=>p.id==='latte');assert.deepEqual(lat.recipe,[{itemId:sk,amount:120,lactoseFreeItemId:lk}]);
+assert.equal((await S('admin/order',ord('latte',{},{milk:'lactose_free'}))).status,200);assert.equal((await S('admin/order',ord('latte'))).status,200);assert.equal((await S('admin/order',ord('cappuccino',{},{milk:'lactose_free'}))).status,200);
+const q=(await dat()).packRuns.find(x=>x.id===lf);assert.equal(q.counted,2);assert.deepEqual(q.lines.map(l=>l.name).sort(),['Cappuccino','Latte']);
+// yedek kural: reçetesiz sütlü ürün, adı "laktozsuz" içeren kalemde yalnız laktozsuz kayıtla sayılır
+const sd=(await dat()).settings.products;assert.equal((await S('admin/settings',{name:'Coffyman',phone:'905548955011',products:sd.map(p=>p.id==='latte'?{...p,recipe:undefined}:p)})).status,200);assert.equal((await dat()).packRuns.find(x=>x.id===lf).counted,2);assert.equal((await S('admin/pack-delete',{id:lf})).status,200)}
+// reçeteye uygula: ayarlar korunur, mevcut satır güncellenir, reçetesiz ürüne satır eklenir
+{const before=(await dat()).settings;for(const bad of [{itemId:'yok',amount:100,productIds:['latte']},{itemId:sk,amount:0,productIds:['latte']},{itemId:sk,amount:100,productIds:[]},{itemId:sk,amount:100,productIds:['yok']},{itemId:sk,amount:'1',productIds:['latte']}])assert.equal((await S('admin/pack-apply',bad)).status,bad.itemId==='yok'?404:400,JSON.stringify(bad));
+r=await S('admin/pack-apply',{itemId:sk,amount:333.3333,productIds:['latte','cappuccino']});assert.equal(r.status,200);assert.deepEqual(r.data.updated,['latte','cappuccino']);const af=(await dat()).settings;
+assert.equal(af.products.find(p=>p.id==='latte').recipe[0].amount,333.333);assert.deepEqual(af.products.find(p=>p.id==='cappuccino').recipe,[{itemId:sk,amount:333.333}]);assert.equal(af.products.find(p=>p.id==='espresso').recipe,undefined);
+assert.equal(af.products.find(p=>p.id==='latte').price,before.products.find(p=>p.id==='latte').price);assert.equal(af.name,before.name);assert.deepEqual(af.syrups,before.syrups);
+// yeni sipariş artık reçeteye göre stok düşer
+const sq=async id=>(await dat()).stock.items.find(x=>x.id===id).qty,b4=await sq(sk);assert.equal((await S('admin/order',ord('cappuccino',{status:'confirmed'}))).status,200);assert.equal(await sq(sk),b4-333.333)}
+// silme
+assert.equal((await S('admin/pack-delete',{id:p2.data.id})).status,200);assert.ok(!(await dat()).packRuns.some(x=>x.id===p2.data.id));
+// yedek / restore: pack_runs taşınır, eski yedek (pack_runs yok) yüklenir, bozuk kayıt reddedilir
+const bk=await buildBackup(F0);assert.ok(bk.pack_runs.length>=2);const keep=(await dat()).packRuns.filter(x=>x.closed).map(x=>[x.id,x.cups,x.cost,x.perCup]);assert.equal(keep.length,1);
+const F1=await freshDB(),Z=mk(F1);let rs=await Z('admin/restore',bk);assert.equal(rs.status,200,JSON.stringify(rs.data));assert.equal(rs.data.result.pack_runs.added,bk.pack_runs.length);assert.deepEqual((await Z('admin/data')).data.packRuns.filter(x=>x.closed).map(x=>[x.id,x.cups,x.cost,x.perCup]),keep);
+rs=await Z('admin/restore',bk);assert.equal(rs.data.result.pack_runs.added,0);
+{const old=structuredClone(bk);delete old.pack_runs;rs=await mk(await freshDB())('admin/restore',old);assert.equal(rs.status,200);assert.equal(rs.data.result.pack_runs.added,0)}
+assert.equal((await mk(await freshDB())('admin/restore',{...bk,pack_runs:[{id:'x'}]})).status,400);assert.equal((await mk(await freshDB())('admin/restore',{...bk,pack_runs:[{...bk.pack_runs[0],size:0}]})).status,400)}
 await stopPg();console.log((PG?'[postgres] ':'[sqlite] ')+'PASS: my-orders (no leaks), reminder template, PWA manifest/sw/icons, stock (recipes, idempotent deduct, cancel restore, hide-out-of-stock, backup), FX fallback; balances survive product delete/price change/menu resave/rename, backup+restore idempotent, redeploy, migration safety;  menu add/edit/delete, validation, lactose-free milk snapshot, legacy settings, person prefs + auto backups, device-bound links, simultaneous first claim, forwarded link anonymity, reserved names, protected orders, new guest identity, admin reset/revocation, contact updates, ordering and staff regression');
