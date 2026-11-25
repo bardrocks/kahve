@@ -520,6 +520,36 @@ const F1=await freshDB(),Z1=E(F1);let rr=await Z1('admin/restore',bk);assert.equ
 // menüden ürün silinirse kayıt kalır, uygulanmaz
 {const cur=(await Q('admin/data')).data.settings;await Q('admin/person-price',{name:'Nastya Ivanova',productId:'espresso',price:60});cur.products=cur.products.filter(p=>p.id!=='espresso');assert.equal((await Q('admin/settings',cur)).status,200);assert.ok((await Q('admin/data')).data.personPrices.some(x=>x.product_id==='espresso'));assert.equal((await Q('orders',{id:crypto.randomUUID(),buyer:'Nastya Ivanova',contact:'05548955011',items:[{id:'espresso',recipient:'x',payer:'Nastya Ivanova',sugar:0,qty:1}]},false)).status,400)}}
 // istemci saf fonksiyonları (tüketim, birim maliyet, kasa/net): index.html'den çıkarıp vm ile test et
+// --- ödeme durumu (FIFO payAlloc) ---
+{const html=fs.readFileSync('index.html','utf8'),m=html.match(/\/\*PURE-START\*\/([\s\S]*?)\/\*PURE-END\*\//);const ctx={};vm.createContext(ctx);vm.runInContext(m[1]+';globalThis.PA=payAlloc',ctx);const PA=ctx.PA;let n=0;
+const O=(t,items,status='confirmed')=>({id:'o'+(++n),created:'2026-11-0'+t+'T10:00:00Z',status,items:items.map(([payer,qty,price])=>({payer,qty,price}))}),P=(person,amount,method,ref)=>({person,amount,method:method||'Nakit',order_ref:ref||null,created:'2026-11-09T10:00:00Z'});
+const st=(r,o)=>r.orders.get(o.id),sm=(r,k)=>r.left.get(k)||0;
+// tam / kısmi / fazla
+let a=O(1,[['Ali',1,100]]),b=O(2,[['Ali',2,100]]),r=PA([a,b],[P('ali',100)]);assert.equal(st(r,a).state,'paid');assert.equal(st(r,b).state,'unpaid');assert.equal(sm(r,'ali'),200);
+r=PA([a,b],[P('Ali',150)]);assert.equal(st(r,a).state,'paid');assert.equal(st(r,b).state,'partial');assert.equal(st(r,b).rem,150);assert.equal(sm(r,'ali'),150);
+r=PA([a,b],[P('ali',500)]);assert.equal(st(r,a).state,'paid');assert.equal(st(r,b).state,'paid');assert.equal(sm(r,'ali'),0);
+// order_ref'li + serbest karışık: ref'li ödeme kendi siparişine sayılır, serbest en eskiye gider
+r=PA([a,b],[P('ali',200,'IBAN',b.id),P('ali',100)]);assert.equal(st(r,a).state,'paid');assert.equal(st(r,b).state,'paid');assert.deepEqual([...st(r,b).methods],['IBAN']);assert.equal(sm(r,'ali'),0);
+r=PA([a,b],[P('ali',200,'Nakit',b.id)]);assert.equal(st(r,a).state,'unpaid');assert.equal(st(r,b).state,'paid');assert.equal(sm(r,'ali'),100);
+// ref'li fazla ödeme serbest havuza geçer
+r=PA([a,b],[P('ali',300,'Nakit',b.id)]);assert.equal(st(r,a).state,'paid');assert.equal(sm(r,'ali'),0);
+// İndirim / Düzeltme
+r=PA([a,b],[P('ali',250),P('ali',50,'İndirim')]);assert.equal(sm(r,'ali'),0);assert.equal(st(r,b).state,'paid');
+r=PA([a,b],[P('ali',-40,'Düzeltme'),P('ali',100)]);assert.equal(sm(r,'ali'),240);assert.equal(st(r,a).state,'partial');assert.equal(st(r,a).rem,40);
+r=PA([a,b],[P('ali',300),P('ali',-40,'Düzeltme')]);assert.equal(sm(r,'ali'),40);assert.equal(st(r,a).state,'paid');assert.equal(st(r,b).state,'partial');assert.equal(st(r,b).rem,40);
+r=PA([a,b],[P('ali',70,'Düzeltme')]);assert.equal(sm(r,'ali'),230);
+// iptal / pending dışarıda
+const c=O(3,[['Ali',1,999]],'cancelled'),pe=O(4,[['Ali',1,888]],'pending');r=PA([a,c,pe],[P('ali',100)]);assert.ok(!r.orders.has(c.id)&&!r.orders.has(pe.id));assert.equal(st(r,a).state,'paid');assert.equal(sm(r,'ali'),0);
+// tarih sırası (giriş sırasından bağımsız)
+r=PA([b,a],[P('ali',100)]);assert.equal(st(r,a).state,'paid');assert.equal(st(r,b).state,'unpaid');
+// çok ödeyenli sipariş
+const m2=O(5,[['Ali',1,100],['Veli',1,60],['Ali',1,40]]);r=PA([m2],[P('Veli',60),P('ali',50)]);const e=st(r,m2);assert.equal(e.due,200);assert.equal(e.state,'partial');assert.equal(e.rem,90);assert.equal(e.by.find(x=>x.k==='veli').state,'paid');assert.equal(e.by.find(x=>x.k==='ali').rem,90);
+r=PA([m2],[P('Veli',60),P('ali',140)]);assert.equal(st(r,m2).state,'paid');
+// toplam = bakiye (siparişler - ödemeler), alacaklıda hepsi ödendi
+const ords=[O(1,[['Ali',1,50],['Veli',1,70]]),O(2,[['Ali',2,40]]),O(3,[['Veli',1,100],['Can',3,30]])],pays=[P('ali',100),P('veli',30,'İndirim'),P('can',-20,'Düzeltme'),P('can',10),P('veli',500)];r=PA(ords,pays);
+for(const k of['ali','veli','can']){const tot=ords.reduce((s,o)=>s+o.items.filter(i=>i.payer.toLowerCase()===k).reduce((x,i)=>x+i.qty*i.price,0),0),pd=pays.filter(p=>p.person===k).reduce((s,p)=>s+p.amount,0);assert.equal(sm(r,k),Math.min(tot,Math.max(0,tot-pd)),k)}
+assert.equal(sm(r,'veli'),0);for(const o of ords)for(const x of st(r,o).by)if(x.k==='veli')assert.equal(x.state,'paid');
+console.log('payAlloc OK');}
 {const html=fs.readFileSync('index.html','utf8'),m=html.match(/\/\*PURE-START\*\/([\s\S]*?)\/\*PURE-END\*\//);assert.ok(m,'PURE blok bulunamadı');const ctx={};vm.createContext(ctx);vm.runInContext(m[1]+';globalThis.F={stkUsage,stkForecast,stkPurchases,stkUnitCosts,cupCost,expSummary,cashNet}',ctx);const F=ctx.F,D=864e5,now=Date.parse('2026-11-20T12:00:00Z'),iso=d=>new Date(now-d*D).toISOString(),mv=(id,delta,reason,d,ref)=>({item_id:id,delta,reason,created:iso(d),ref:ref||null});
 const moves=[mv('a',50,'purchase',20,'e0'),mv('a',-10,'order',18),mv('a',-20,'order',12),mv('a',40,'purchase',10,'e1'),mv('a',-6,'order',8),mv('a',3,'cancel',7),mv('a',-30,'order',2),mv('b',-5,'order',1)];
 let u=F.stkUsage(moves,'a',now);assert.ok(Math.abs(u.days-20)<1e-6);assert.ok(Math.abs(u.used-(10+20+6-3+30))<1e-9);assert.ok(Math.abs(u.perDay-63/20)<1e-9);
