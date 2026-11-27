@@ -815,6 +815,15 @@ for(const bad of [{products:'x'},{products:[{label:'',price:10}]},{products:[{la
 assert.equal((await sv({products:ps,iban:'TR33 0006 1005 1978 6457 8413 26',ibanName:'  Test   Kişi '})).status,200);let s1=(await dat()).settings;assert.equal(s1.ioniq.iban,IBAN);assert.equal(s1.ioniq.ibanName,'Test Kişi');assert.equal(s1.name,'Ioniq Test');assert.equal(s1.lactoseFreeExtra,7);assert.equal(s1.reminderTemplate,'Selam {ad}');assert.equal(s1.products.find(p=>p.id==='latte').recipe.length,3);
 // ioniq göndermeyen ayar kaydı ioniq'i korur
 assert.equal((await Z('admin/settings',{name:'Ioniq Test 2',phone:st.phone,products:prods})).status,200);s1=(await dat()).settings;assert.equal(s1.ioniq.iban,IBAN);assert.equal(s1.ioniq.products.length,6);assert.equal(s1.name,'Ioniq Test 2');
+// qrImage: kayıt / koruma / kaldırma / doğrulama
+{const QI='data:image/png;base64,iVBORw0KGgo=',ps=(await cur());assert.equal((await sv({products:ps,iban:IBAN,ibanName:'Test Kişi',qrImage:QI})).status,200);assert.equal((await dat()).settings.ioniq.qrImage,QI);
+assert.equal((await Z('admin/settings',{name:'Ioniq Test 2',phone:st.phone,products:prods})).status,200);assert.equal((await dat()).settings.ioniq.qrImage,QI);
+assert.equal((await sv({products:ps,iban:IBAN,ibanName:'Test Kişi'})).status,200);assert.equal((await dat()).settings.ioniq.qrImage,QI);
+for(const bad of ['data:image/gif;base64,AAAA','data:text/html;base64,AAAA','http://x/y.png',5,'data:image/png;base64,'+'A'.repeat(400000)])assert.equal((await sv({products:ps,iban:IBAN,ibanName:'Test Kişi',qrImage:bad})).status,400);
+assert.equal((await dat()).settings.ioniq.qrImage,QI);
+{const r=await worker.fetch(new Request('https://mola.test/api/menu',{headers:{'X-Mola-Device':'f'.repeat(64)}}),{DB:D,ADMIN_KEY:'test-key'}),txt=await r.text();assert.ok(!txt.includes('iVBORw0KGgo')&&!txt.includes('qrImage'))}
+const okBig='data:image/jpeg;base64,'+'A'.repeat(400000-23);assert.equal((await sv({products:ps,iban:IBAN,ibanName:'Test Kişi',qrImage:okBig})).status,200);
+assert.equal((await sv({products:ps,iban:IBAN,ibanName:'Test Kişi',qrImage:''})).status,200);assert.equal((await dat()).settings.ioniq.qrImage,'');assert.equal((await sv({products:ps,iban:IBAN,ibanName:'Test Kişi',qrImage:QI})).status,200);assert.equal((await sv({products:ps,iban:IBAN,ibanName:'Test Kişi',qrImage:null})).status,200);assert.equal((await dat()).settings.ioniq.qrImage,'')}
 // GİZLİLİK: herkese açık menüde ioniq yok
 {const r=await worker.fetch(new Request('https://mola.test/api/menu',{headers:{'X-Mola-Device':'f'.repeat(64)}}),{DB:D,ADMIN_KEY:'test-key'}),txt=await r.text(),j=JSON.parse(txt);assert.equal(r.status,200);assert.ok(!('ioniq' in j));assert.ok(!txt.includes(IBAN)&&!txt.includes('Test Kişi')&&!txt.toLowerCase().includes('iban'));assert.ok(!('reminderTemplate' in j))}
 // satış doğrulama
