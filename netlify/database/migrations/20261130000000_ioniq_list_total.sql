@@ -1,0 +1,1 @@
+ALTER TABLE ioniq_sales ADD COLUMN IF NOT EXISTS list_total INTEGER;

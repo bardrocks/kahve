@@ -847,6 +847,33 @@ assert.equal((await Z('admin/ioniq-sale-delete',{id:sid})).status,404);assert.eq
 assert.equal((await Z('admin/settings',{name:'Ioniq Test 2',phone:st.phone,products:prods,milkMode:'lactose_free_only'})).status,200);r=await sale([{productId:'latte',qty:1}]);assert.equal(r.status,200);assert.equal(await qty(lf),l0-200);assert.equal(await qty(milk),m0);assert.equal((await Z('admin/ioniq-sale-delete',{id:r.data.id})).status,200);assert.equal(await qty(lf),l0);
 // menüde bağlı olmayan (label'lı) kahve: satılır, stok düşmez
 assert.equal((await sv({products:[...(await cur()),{productId:'',label:'Özel Kahve',price:99}],iban:IBAN,ibanName:'Test Kişi'})).status,200);r=await sale([{productId:'',label:'Özel Kahve',qty:2}]);assert.equal(r.status,200);assert.equal(r.data.total,198);assert.equal(await qty(cof),c0);assert.equal((await sale([{productId:'',label:'Yok',qty:1}])).status,400);assert.equal((await Z('admin/ioniq-sale-delete',{id:r.data.id})).status,200);
+// elle tutar (amount): alınan para total, liste list_total; update ucu; eski (list_total NULL) kayıtlar
+{const ob=JSON.stringify((await dat()).balances),oo=(await dat()).orders.length,op=(await dat()).payments.length;
+let r=await Z('admin/ioniq-sale',{items:[{productId:'latte',qty:1}],method:'Nakit',amount:400});assert.equal(r.status,200,JSON.stringify(r.data));assert.equal(r.data.total,400);assert.equal(r.data.sale.listTotal,150);const a1=r.data.id;
+let row=(await dat()).ioniqSales.find(x=>x.id===a1);assert.equal(row.total,400);assert.equal(row.listTotal,150);
+r=await Z('admin/ioniq-sale',{items:[{productId:'latte',qty:1}],method:'IBAN'});assert.equal(r.data.total,150);assert.equal(r.data.sale.listTotal,150);const a2=r.data.id;
+r=await Z('admin/ioniq-sale',{items:[{productId:'latte',qty:1}],method:'Nakit',amount:100});assert.equal(r.data.total,100);assert.equal(r.data.sale.listTotal,150);const a3=r.data.id;
+for(const amount of [0,-5,1.5,'400',100001,true])assert.equal((await Z('admin/ioniq-sale',{items:[{productId:'latte',qty:1}],method:'Nakit',amount})).status,400,String(amount));
+assert.equal((await dat()).ioniqSales.length,4);
+assert.equal((await call('admin/ioniq-sale-update',{id:a2,amount:200})).status,401);
+let u=await Z('admin/ioniq-sale-update',{id:a2,amount:300});assert.equal(u.status,200);assert.equal(u.data.total,300);assert.equal(u.data.listTotal,150);assert.equal(u.data.method,'IBAN');
+u=await Z('admin/ioniq-sale-update',{id:a2,method:'Nakit'});assert.equal(u.status,200);assert.equal(u.data.method,'Nakit');assert.equal(u.data.total,300);
+u=await Z('admin/ioniq-sale-update',{id:a2,amount:250,method:'IBAN'});assert.equal(u.data.total,250);assert.equal(u.data.method,'IBAN');
+for(const bad of [{id:a2,amount:0},{id:a2,amount:1.5},{id:a2,amount:'9'},{id:a2,method:'Kart'},{id:a2}])assert.equal((await Z('admin/ioniq-sale-update',bad)).status,400,JSON.stringify(bad));
+assert.equal((await Z('admin/ioniq-sale-update',{id:'yok',amount:5})).status,404);assert.equal((await Z('admin/ioniq-sale-update',{amount:5})).status,404);
+row=(await dat()).ioniqSales.find(x=>x.id===a2);assert.equal(row.total,250);assert.equal(row.listTotal,150);assert.equal(row.items[0].qty,1);
+// eski kayıt: list_total kolonu hiç yazılmamış
+await D.prepare('INSERT INTO ioniq_sales(id,created,method,total,items) VALUES(?,?,?,?,?)').bind('legacy1',new Date().toISOString(),'Nakit',130,JSON.stringify([{productId:'americano',label:'Americano',price:130,qty:1}])).run();
+let ld=await dat();row=ld.ioniqSales.find(x=>x.id==='legacy1');assert.equal(row.total,130);assert.equal(row.listTotal,130);
+assert.equal((await Z('admin/ioniq-sale-update',{id:'legacy1',amount:180})).data.listTotal,130);
+await D.prepare('UPDATE ioniq_sales SET total=130,list_total=NULL WHERE id=?').bind('legacy1').run();
+const bk2=await buildBackup(D);assert.equal(bk2.ioniq_sales.find(x=>x.id==='legacy1').list_total,null);
+{const old=structuredClone(bk2);old.ioniq_sales=old.ioniq_sales.map(({list_total,...x})=>x);const F=await freshDB();const rr=await worker.fetch(new Request('https://mola.test/api/admin/restore',{method:'POST',headers:{Origin:'https://mola.test','X-Mola-Device':'g'.repeat(64),Authorization:'Bearer test-key','Content-Type':'application/json'},body:JSON.stringify(old)}),{DB:F,ADMIN_KEY:'test-key'});assert.equal(rr.status,200);
+const back=await (await worker.fetch(new Request('https://mola.test/api/admin/data',{headers:{Authorization:'Bearer test-key','X-Mola-Device':'g'.repeat(64)}}),{DB:F,ADMIN_KEY:'test-key'})).json();assert.equal(back.ioniqSales.length,old.ioniq_sales.length);assert.ok(back.ioniqSales.every(x=>x.listTotal===x.total))}
+{const F=await freshDB(),rr=await worker.fetch(new Request('https://mola.test/api/admin/restore',{method:'POST',headers:{Origin:'https://mola.test','X-Mola-Device':'g'.repeat(64),Authorization:'Bearer test-key','Content-Type':'application/json'},body:JSON.stringify(bk2)}),{DB:F,ADMIN_KEY:'test-key'});assert.equal(rr.status,200);const back=await (await worker.fetch(new Request('https://mola.test/api/admin/data',{headers:{Authorization:'Bearer test-key','X-Mola-Device':'g'.repeat(64)}}),{DB:F,ADMIN_KEY:'test-key'})).json();assert.equal(back.ioniqSales.find(x=>x.id===a1).total,400);assert.equal(back.ioniqSales.find(x=>x.id===a1).listTotal,150)}
+for(const lt of [-1,1.5]){const bad={...bk2,ioniq_sales:[{...bk2.ioniq_sales[0],list_total:lt}]},rr=await worker.fetch(new Request('https://mola.test/api/admin/restore',{method:'POST',headers:{Origin:'https://mola.test','X-Mola-Device':'g'.repeat(64),Authorization:'Bearer test-key','Content-Type':'application/json'},body:JSON.stringify(bad)}),{DB:await freshDB(),ADMIN_KEY:'test-key'});assert.equal(rr.status,400)}
+for(const x of [a1,a2,a3,'legacy1'])assert.equal((await Z('admin/ioniq-sale-delete',{id:x})).status,200);
+const fd=await dat();assert.equal(fd.ioniqSales.length,1);assert.equal(fd.orders.length,oo);assert.equal(fd.payments.length,op);assert.equal(JSON.stringify(fd.balances),ob)}
 // yedek / restore: ioniq_sales taşınır; eski yedek (ioniq_sales yok) yüklenir; bozuk kayıt reddedilir
 const bk=await buildBackup(D);assert.equal(bk.ioniq_sales.length,1);assert.equal(bk.ioniq_sales[0].id,sid2);
 const rest=async(F,b)=>{const rr=await worker.fetch(new Request('https://mola.test/api/admin/restore',{method:'POST',headers:{Origin:'https://mola.test','X-Mola-Device':'g'.repeat(64),Authorization:'Bearer test-key','Content-Type':'application/json'},body:JSON.stringify(b)}),{DB:F,ADMIN_KEY:'test-key'});return {status:rr.status,data:await rr.json().catch(()=>null)}};
